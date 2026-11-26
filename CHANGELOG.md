@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 Semantic Versioning.
 
+## [0.50.2] - 2026-11-27
+
+### Changed
+- Downstream experimental Vulkan optional device entry-point guards and a stock Android compatibility plan. Hardware validation is pending; no release has been published.
+
 ## [0.50.1] - 2026-11-25
 
 ### Fixed

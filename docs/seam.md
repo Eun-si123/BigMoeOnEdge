@@ -411,3 +411,11 @@ The hook still fires ahead of upstream's tiled `mul_mat_id` path, which G4 prove
 its own fork branch and the
 previous ones stay, so every commit an old pin names remains reachable (see `.gitmodules` /
 `git submodule status` for the current pin).
+
+## Fork-specific Vulkan compatibility experiment
+
+This downstream fork pins a separate commit on `Eun-si123/llama.cpp` after the existing two
+upstream hooks. The optional buffer-device-address and external-host-import entry points are
+resolved per logical device, with feature fallback if they are missing. No public engine API
+or streaming layout changes. See [compatibility plan](s22-compatibility.md) for evidence and
+the required Android / real-device gates. This is not a validated device fix or a release.

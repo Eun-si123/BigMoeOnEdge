@@ -514,3 +514,7 @@ nothing — retaining predicted residents against eviction — moved the hit rat
 `--predict-prefetch` ships off by default, and the app defaults its budget to retention-only. What
 would change the answer is a device where flash is *not* the constraint, or a predictor that reaches
 layer 0 — which needs a trained per-layer artifact, a different project from this one.
+
+## Fork-specific compatibility work
+
+See [stock Android / Snapdragon 8 Gen 1 compatibility plan](s22-compatibility.md).
