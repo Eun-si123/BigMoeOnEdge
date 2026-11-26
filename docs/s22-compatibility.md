@@ -2,6 +2,8 @@
 
 Goal: run large local MoE GGUFs on stock Android (12 GB RAM, Adreno 730, Hexagon v69, UFS 3.1) without root or a remote inference host. Preserve the upstream engine's lossless streaming, isolation, and portable planner. Optimize sustained decode, not just prefill. No claimed support until tested on the actual device.
 
+See [external research and implementation references](research-references.md) for source-specific reuse candidates and validation requirements.
+
 ## Evidence and baseline
 
 - User observation: Vulkan probe SIGSEGV (11), HTP probe SIGABRT (6), OpenCL prompt rate approximately 1.0x CPU, CPU selected. These are symptoms, not symbolized root causes.

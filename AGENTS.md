@@ -10,6 +10,16 @@ A ports-and-adapters engine that streams MoE experts from flash so >RAM models r
 device, built **on top of** llama.cpp's public API. The whole value proposition is that
 we do not fork llama.cpp. See `docs/architecture.md` and `docs/seam.md`.
 
+## Downstream stock Android research
+
+For the Snapdragon compatibility branch, read `docs/s22-compatibility.md` and
+`docs/research-references.md` before relevant implementation work. Inspect the cited upstream
+patches and research, reuse compatible existing code before inventing new mechanisms, and record
+source revisions, licensing, tests and negative results. The downstream dependency fork is
+permitted only for scoped, documented backend compatibility changes; the no-in-tree-patch rule
+and existing streaming invariants still apply. Do not treat external benchmark numbers as
+measurements on the target phone.
+
 ## Project map
 
 - `core/include/bmoe/` — ports (interfaces) + config. Pure policy, no llama.cpp include.

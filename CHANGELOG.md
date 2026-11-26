@@ -8,6 +8,7 @@ Semantic Versioning.
 
 ### Changed
 - Downstream experimental Vulkan optional device entry-point guards and a stock Android compatibility plan. Hardware validation is pending; no release has been published.
+- Added an external research register and agent guidance for source-backed compatibility work.
 
 ## [0.50.1] - 2026-11-25
 
