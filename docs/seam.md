@@ -423,4 +423,5 @@ A second fork commit on top of it (`1aa23b22b`, branch `s22/vk-device-api-gate`)
 device that reports a device API below 1.2, on every path that picks a device, instead of calling
 1.2 commands that may not exist. A third (`ba5f8943f`) takes the timeline-semaphore commands from the
 device when it is the only Vulkan device, and drops the second commit's unconditional KHR fallback
-(`docs/s22-compatibility.md`). Again backend-only: no engine API changes.
+(`docs/s22-compatibility.md`). A fourth (`8644cb849`) drives a device that reports below 1.2 through its
+KHR/EXT extensions instead of skipping it. Again backend-only: no engine API changes.

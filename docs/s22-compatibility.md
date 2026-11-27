@@ -27,52 +27,84 @@ See [external research and implementation references](research-references.md) fo
 | P2 | Optional app-local Turnip | No root/system driver replacement; verify loader, license, compatibility and fallback; only if system Vulkan cannot be made reliable |
 | P3 | Debug APK, regression gates, portable release | Build arm64 CPU/Vulkan/OpenCL; run existing host gates, real-device tests and independent regression checks before release |
 
-### Vulkan: what is known, and the fork commits
+### Device diagnostics (stock S22 Ultra, Vulkan report, 2026-11-27)
 
-The Adreno 730 crash (Box #109/#121: `pc 0`, in `ggml_vk_create_buffer`, on driver 0615.95) means a
-command resolved to NULL, or to a stub that jumps to an empty slot. Which command, and why, is **not
-confirmed** on this phone. Box #109 reports "Vulkan API 1.3 (0x00403000)" without saying whether that
-is the loader's version or the device's; if it is the device's, a "device below 1.2" explanation does
-not apply to that phone. The diagnostics below exist to settle it.
+What the phone's own report said, reported by the owner (values from the Vulkan API only; no
+serial, account or path):
 
-Fork branch `s22/vk-device-api-gate` on `Eun-si123/llama.cpp`, on top of `f7adfde`:
+| Item | Value |
+| --- | --- |
+| Loader (instance) version | 1.4.0 |
+| Physical device | Adreno 730, **API 1.1.128** |
+| Conformance version | 1.2.7.2 |
+| `VK_KHR_buffer_device_address` / `VK_KHR_timeline_semaphore` | offered |
+| `bufferDeviceAddress` / `timelineSemaphore` (through the extensions' structs) | yes / yes |
+| Logical device with both KHR extensions enabled | created |
+| `vkGetDeviceProcAddr`, core names (`vkGetBufferDeviceAddress`, `vkWaitSemaphores`, `vkSignalSemaphore`, `vkGetSemaphoreCounterValue`) | NULL |
+| `vkGetDeviceProcAddr`, the `...KHR` names | valid |
+| Core `vkGetBufferDeviceAddress` through the instance | **SIGSEGV** (reproduced) |
 
-- `1aa23b22b`: a device whose own `apiVersion` is below 1.2 is skipped, with a log line, on every path
-  that picks a device (the default list, the "first non-CPU device" fallback that skipped every check,
-  and `GGML_VK_VISIBLE_DEVICES`). Applies only if the driver reports 1.1.
-- `ba5f8943f`: **a mechanism reproduced here that defeats NULL checks.** ggml's global dispatcher takes
-  `vkWaitSemaphores`, `vkSignalSemaphore` and `vkGetSemaphoreCounterValue` from
-  `vkGetInstanceProcAddr`. Where the core name answers NULL, Vulkan-Hpp falls back to the KHR alias,
-  which the loader does answer; the device never enabled `VK_KHR_timeline_semaphore`, so that
-  trampoline jumps to an empty slot. The result is SIGSEGV at pc 0 in
-  `ggml_backend_vk_device_event_synchronize`, which a check on the dispatcher cannot see, and
-  `f7adfde`'s guards do not cover. It is the same failure class as Box #121 (a guard added, the same
-  crash), which does not prove it is the same command. With one Vulkan device the commit takes these
-  three commands from `vkGetDeviceProcAddr`: **the GPU keeps running.** If the device has none of them,
-  it stops with the command named instead of crashing. With several devices the global dispatcher is
-  left alone, because one device's pointer is not valid for another.
-- The same commit removes `1aa23b22b`'s `vkGetBufferDeviceAddressKHR` fallback. The report below shows a
-  conformant driver (Mesa) answering NULL for the KHR name until the extension is enabled, and ggml
-  never enables it. So the fallback can only ever succeed on a non-conformant driver, by handing out a
-  command that is not valid to call.
+So on this phone the cause is settled: a 1.4 loader in front of a device that reports 1.1 and offers
+the 1.2 features only as extensions. ggml requires 1.2 from the instance alone, reads features
+through `VkPhysicalDeviceVulkan12Features` (not defined for a 1.1 device: left unfilled), never
+enables the KHR extensions, and calls the core names. Box #109's "1.3" on another Adreno 730 is
+probably that phone's loader version; it is not this phone's device version.
 
-Mock tests on the host: lavapipe shown as an integrated GPU, through an `LD_PRELOAD` interposer
-(`SHIM_NULL`, `SHIM_NULL_INSTANCE_ONLY`, `SHIM_API11`) used during development; the shim is not
-committed.
+### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
-| Case | Before (`f7adfde`) | After (`ba5f8943f`) |
-| --- | --- | --- |
-| no NULL | runs on the GPU | runs on the GPU, same output as the CPU |
-| `vkGetBufferDeviceAddress` NULL (instance and device) | BDA off, runs | same |
-| `vkGetMemoryHostPointerPropertiesEXT` NULL | staging, runs | same |
-| `vkWaitSemaphores` NULL on the instance only | **SIGSEGV pc 0** | log line, **runs on the GPU** |
-| a timeline command NULL on instance and device | **SIGSEGV pc 0** (vkWaitSemaphores) | abort naming the command |
-| device reports 1.1 | used | skipped, CPU |
+A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
 
-`test-backend-ops -o MUL_MAT_ID` on lavapipe: 1194/1194 with no NULL. The run with all three timeline
-commands NULL on the instance is noted in the PR. **Nothing here has run on an Adreno 730.**
+1. **Features and properties**: through each extension's own struct (16-bit storage (core 1.1),
+   `KHR_shader_float16_int8`, `KHR_8bit_storage`, `KHR_buffer_device_address`,
+   `KHR_timeline_semaphore`, `KHR_vulkan_memory_model`, `EXT_scalar_block_layout`,
+   `KHR_shader_subgroup_extended_types`, `KHR_uniform_buffer_standard_layout`, `EXT_host_query_reset`;
+   subgroup, float-controls and driver properties). Their values are copied into the fields the rest
+   of the backend reads, so every later decision is the same code.
+2. **Enabling**: each of those extensions the device offers is enabled by name, with its struct in
+   `vkCreateDevice`, plus `KHR_shader_float_controls` and `KHR_spirv_1_4`. Enabling the extension is
+   what makes its KHR commands valid to call.
+3. **Dispatch**: each 1.2 command comes from `vkGetDeviceProcAddr`, by its core name, else by its
+   KHR/EXT alias only if that extension was enabled; the global dispatcher's entries are replaced by
+   these. Because the dispatcher is global, a pre-1.2 device is kept only when it is the sole Vulkan
+   device (a phone); a device with no timeline semaphores at all is skipped.
+4. **1.2+ devices** take the unchanged path. On every device the CPU stays the fallback, and the
+   planner still uses the GPU only where it measures faster with the same results.
 
-Not covered: `resetQueryPool` (1.2 core) is reached only with the perf logger on (`GGML_VK_PERF_LOGGER`).
+Earlier commits on the branch: `f7adfde` (BDA and host-import guards), `1aa23b22b` (the pre-1.2 skip,
+replaced by this path; its fallback-path check stays), `ba5f8943f` (timeline commands from the device).
+
+**Host tests**: lavapipe behind `tests/vulkan_s22_shim.c`, which reproduces the phone's report:
+apiVersion 1.1.128, the Vulkan1x structs ignored, core names NULL on the device, pc-0 stubs on the
+instance.
+
+| Test | Result |
+| --- | --- |
+| Vulkan report under the shim | completes; no core call below 1.2; KHR buffer address and timeline calls succeed; SPIR-V 1.3 and 1.5 pipelines created |
+| Tiny MoE (`llama-simple`, all layers on the device) under the shim | runs on the GPU; output byte-identical to the unchanged 1.2+ path |
+| `test-backend-ops -o MUL_MAT_ID` under the shim, with `shaderInt64`, integer dot, coopmat, BDA and host import hidden | 1194/1194 |
+| `MUL_MAT` f16 x f32 with n>8 | fails the same way under the shim, on the 1.2+ path and with no shim at all (lavapipe's cooperative-matrix path); passes with coopmat hidden. The Android build compiles no coopmat shaders |
+
+The full `test-backend-ops` result under the shim with coopmat hidden is in the PR.
+
+**SPIR-V audit** (`scripts/spirv-audit.py` over the modules the Android build produces: each one's
+header and its `OpCapability`/`OpExtension`):
+
+- All 1190 modules of the Android build are **SPIR-V 1.5** (`glslc --target-env=vulkan1.2`). By the
+  spec, a 1.1 device takes SPIR-V 1.3, or 1.4 with `VK_KHR_spirv_1_4`. Whether the Adreno driver takes
+  1.5 below 1.2 is the open question. The report now creates a compute pipeline from a 1.3 and a 1.5
+  module, plain and with the capabilities below, to answer it on the phone.
+- Capabilities (number of modules): StorageBuffer16BitAccess 984, StorageBuffer8BitAccess 711,
+  Int8 564, Int16 398, Float16 344, GroupNonUniform 223, GroupNonUniformArithmetic 201, mixed float
+  dot (VALVE) 170, Shuffle 18, Vote 7, Int64 4, PhysicalStorageBufferAddresses 4, Clustered 3,
+  Ballot 2, ShaderClock 1, VulkanMemoryModel 1. Each one is gated by the feature it needs, read in
+  step 1. Int64 and buffer addresses appear only in the four `_bda` variants, used only with both
+  features. On Adreno, ggml already turns subgroup arithmetic off (a known driver issue).
+- The NDK's glslc builds no cooperative-matrix or integer-dot shaders, so on the phone those paths
+  are the scalar ones already.
+- Rebuilt for SPIR-V 1.3 (`--target-env=vulkan1.1`), 161 of 162 sources compile. `im2col`
+  (convolutions, not used by these LLMs) needs 1.4 for a specialization-constant conversion. So a 1.3
+  shader set is a viable fallback if the phone refuses 1.5. It would double the shader binaries
+  (about 35 MB more in the APK), so it is not built unless the report shows it is needed.
 
 ### Vulkan report (`/api/diagnostics/vulkan`, "Copy Vulkan report")
 
@@ -94,7 +126,9 @@ child's other output (driver logs, paths) does not.
 
 ### What to record on the phone
 
-1. Plan screen, "Copy Vulkan report": the whole text. It settles the device version and the NULL commands.
+1. Plan screen, "Copy Vulkan report": the whole text. The device version and the NULL commands are
+   settled; what is open is the `device0.with-khr.spirv.*` lines (does the driver take SPIR-V 1.5
+   below 1.2) and whether `Vulkan0` now appears in the Plan's devices, and what the planner measured.
 2. Plan screen, "Device backends": each device's status and reason (now with signal and step). Whether
    `Vulkan0` (Adreno 730) is used, refused on results or speed, or unusable, and why.
 3. For the 35B Q5_K_M first-load failure: the error text shown, and whether the engine process was
@@ -122,7 +156,6 @@ which is account-walled and not redistributable, so a build here cannot include 
 
 ### Fork commits pinned
 
-`f7adfde`, `1aa23b22b` and `ba5f8943f` on `Eun-si123/llama.cpp` `s22/vk-device-api-gate`, on top of
-the two upstream hooks (`docs/seam.md`). With one Vulkan device the global dispatcher's three timeline
-commands are replaced by the device's own; with several it is left alone. Unverified on hardware. No
-release or speed claim follows from these changes alone.
+`f7adfde`, `1aa23b22b`, `ba5f8943f` and `8644cb849` on `Eun-si123/llama.cpp`
+`s22/vk-device-api-gate`, on top of the two upstream hooks (`docs/seam.md`). Unverified on an Adreno
+730. No release or speed claim follows from these changes alone.
