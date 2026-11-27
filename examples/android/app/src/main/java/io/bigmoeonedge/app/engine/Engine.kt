@@ -827,6 +827,11 @@ object Engine {
     }
 
     /** The release feed, read by the server when a person taps the button (docs/screens.md, "Updates"). */
+    /** The Vulkan report's text, and whether the process that asked the driver finished. */
+    suspend fun vulkanReport(): Result<Pair<String, Boolean>> = withContext(Dispatchers.IO) {
+        catching { api.vulkanReport().let { it.getString("text") to it.optBoolean("complete", false) } }
+    }
+
     suspend fun checkUpdate(): Result<UpdateInfo> = withContext(Dispatchers.IO) { catching { UpdateInfo.of(api.update()) } }
 
     /** A model in the server's models directory, deleted by the server by its listed name (every file of a set). */

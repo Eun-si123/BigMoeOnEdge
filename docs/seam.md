@@ -419,3 +419,16 @@ upstream hooks. The optional buffer-device-address and external-host-import entr
 resolved per logical device, with feature fallback if they are missing. No public engine API
 or streaming layout changes. See [compatibility plan](s22-compatibility.md) for evidence and
 the required Android / real-device gates. This is not a validated device fix or a release.
+A second fork commit on top of it (`1aa23b22b`, branch `s22/vk-device-api-gate`) skips a Vulkan
+device that reports a device API below 1.2, on every path that picks a device, instead of calling
+1.2 commands that may not exist. A third (`ba5f8943f`) takes the timeline-semaphore commands from the
+device when it is the only Vulkan device, and drops the second commit's unconditional KHR fallback
+(`docs/s22-compatibility.md`). A fourth (`8644cb849`) drives a device that reports below 1.2 through its
+KHR/EXT extensions instead of skipping it. A fifth (`d486a5759`) builds the q4_K mat-vec pipelines at
+workgroup 16 on Qualcomm's proprietary driver, whose compiler refuses them at 32 and above. A sixth
+(`d5dde4318`) names a refused pipeline in the exception's text and exports
+`ggml_backend_vk_check_pipelines` through `ggml_backend_reg_get_proc_address`, which
+`core/src/plan/pipeline_probe.cpp` calls when it is there. A seventh (`437dde482`) finds, on
+Qualcomm's proprietary driver, the families of pipelines its compiler refuses and routes those ops
+around them (a mat-vec to the matmul, a get_rows or copy to the CPU), and reverts the fifth. Again
+backend-only: no engine API changes.

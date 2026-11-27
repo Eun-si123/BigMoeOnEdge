@@ -13,7 +13,9 @@ a single ~25-line hook on a fork branch with an explicit sunset (see below and
 frontend/       what every front-end does the same way: user_dirs (the per-user data folder,
                 and the folder each model's measurements are kept in), so what one measured is
                 the others', and backend_env (what the compute backends read from their environment,
-                one table set before any loads); linked by bmoe-cli, bmoe-server and the desktop app
+                one table set before any loads), and vulkan_report (what the Vulkan loader and each
+                device say about themselves, asked without ggml); linked by bmoe-cli, bmoe-server and
+                the desktop app
 cli/            bmoe-cli — parses flags, the only place env vars are read
 server/         bmoe-server: the application framework every UI speaks to (docs/application-framework.md),
                 and the engine behind the desktop web UI (docs/server-api.md)
@@ -194,7 +196,8 @@ core/
                   layer_probe (one real layer of the model, its experts and its dense matrices, on
                   every backend: measured-planning.md, Step 3), gate_probe,
                   device_probe, placement_probe, isolated_probe (a device asked in a second
-                  process, so a driver that ends it ends only that), native_memory_probe,
+                  process, so a driver that ends it ends only that), pipeline_probe (a backend's
+                  pipelines created one at a time, the ones its driver refuses named), native_memory_probe,
                   metal_memory_probe, opencl_memory_probe and memory_topology (whether a device
                   shares the host's memory, from its own API) - the adapters that
                   measure a machine and read a gguf; the only place in the planner where a platform

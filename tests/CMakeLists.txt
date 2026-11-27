@@ -203,6 +203,11 @@ target_link_libraries(bmoe_llama_log_test PRIVATE bmoe_core)
 target_include_directories(bmoe_llama_log_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src/engine)
 add_test(NAME llama_log COMMAND bmoe_llama_log_test)
 
+# The Vulkan report (frontend/vulkan_report.h): its shape on whatever this machine has, loader or not.
+add_executable(bmoe_vulkan_report_test vulkan_report_test.cpp)
+target_link_libraries(bmoe_vulkan_report_test PRIVATE bmoe_frontend)
+add_test(NAME vulkan_report COMMAND bmoe_vulkan_report_test)
+
 # probe_devices against this build's real ggml registry: an accelerator (BLAS, AMX, ...) is left out
 # of the profile by its device type, every other device is kept. No model needed.
 add_executable(bmoe_device_probe_test device_probe_test.cpp)

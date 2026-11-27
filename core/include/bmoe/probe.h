@@ -208,12 +208,46 @@ bool device_facts_from_text(const std::string & text, ComputeDevice & d);
 // output on the same stream.
 extern const char * const device_facts_marker;
 
+// The step a child was on, printed before each one so that a child which dies without an error -
+// a driver that calls a NULL function, an abort inside a backend - still says where. Only names
+// from a fixed list are printed and read back: the child's other output (paths, driver logs) never
+// reaches the reason. Returns "" when the output names no known step.
+extern const char * const probe_stage_marker;
+std::string last_probe_stage(const std::string & child_output);
+// "SIGSEGV" for 11 and so on, "" for a signal this list does not name.
+const char * signal_name(int sig);
+// What a child that aborted said last, from the lines a runtime prints on the way down: ggml's
+// "file:line: message" (GGML_ABORT, GGML_ASSERT), libc++abi's "terminating due to uncaught exception
+// of type ...", libstdc++'s "terminate called ..." with its "what():", led by ggml-vulkan's line naming
+// the pipeline, module or layout it failed to create where there is one. Directories are cut from every
+// path-like word, so only a source file's name survives, and the text is bounded. "" when no such
+// line is there: a driver's own output and a backtrace never reach the reason.
+std::string probe_last_words(const std::string & child_output);
+
 // A runner that starts this same executable again with `argv_for(device)` and gives it
 // `timeout_seconds` to answer. Fails - with the reason - when the child exits abnormally, runs out
 // of time or prints no facts; and, where this platform has no way to do it, returns a runner that
 // is empty (`!runner`), which a caller reads as "probe here instead".
 DeviceProbeRunner self_process_runner(std::function<std::vector<std::string>(const std::string & device)> argv_for,
                                       double timeout_seconds);
+
+// The same isolation for a front-end's own diagnostic child: this executable again with `args`, its
+// output in `out`, and how it ended in `why` (empty when it exited 0; otherwise the signal, exit code
+// or time-out, worded as for a probe). False where no second process could be started at all - on
+// a platform without one, `why` says so and nothing was run.
+bool run_self_child(const std::vector<std::string> & args,
+                    double timeout_seconds,
+                    std::string & out,
+                    std::string & why);
+
+// The compute pipelines whose name starts with one of the comma-separated `prefixes`, created one at
+// a time on every device whose backend offers the check (this engine's llama.cpp fork exports it for
+// Vulkan), each reported as `report(device, pipeline, status)`: "start" before it is created - a
+// driver that ends the process there leaves that as its last word - then "ok" or the driver's error.
+// False where no backend offers the check. Backends must be registered first.
+using PipelineReport =
+    std::function<void(const std::string & device, const std::string & pipeline, const std::string & status)>;
+bool check_backend_pipelines(const std::string & prefixes, const PipelineReport & report);
 
 // How much memory this process can hold and expect to keep, which is not what the machine reports
 // as available: where a reclaim compresses, that figure is a floor for what could be taken and an

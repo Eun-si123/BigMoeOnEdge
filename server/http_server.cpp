@@ -46,6 +46,7 @@
 #include "bmoe/measured_knobs.h"
 #include "bmoe/model_records.h"
 #include "backend_env.h"
+#include "vulkan_report.h"
 #include "user_dirs.h"
 #include "bmoe/params.h"
 #include "bmoe/probe.h"
@@ -55,6 +56,7 @@
 #include <cpp-httplib/httplib.h>
 
 #include <algorithm>
+#include <sstream>
 #include <cctype>
 #include <atomic>
 #include <chrono>
@@ -78,6 +80,17 @@ namespace {
 
 constexpr const char * kDefaultHfEndpoint = "https://huggingface.co";
 constexpr int kHfSearchLimit = 20; // repositories a search answers with: a screen's worth
+// The Vulkan report creates two devices and makes four calls on each: seconds on a phone, so a
+// driver that hangs is the only way past this.
+constexpr double kVulkanReportSeconds = 30.0;
+// The pipeline check creates every pipeline the backend registers, one at a time: a refusal anywhere
+// in the paths a run can take is listed, not only in the families someone thought to name (the S22's
+// matmul_quant was missed that way). Thousands of pipelines; a driver that hangs, or a slow one, is
+// what the limit is for, and what was refused before it is kept.
+constexpr double kVulkanPipelineSeconds = 600.0;
+constexpr const char * kVulkanPipelinePrefixes = ""; // every pipeline
+constexpr const char * kVulkanPipelineMarker = "BMOE_VKP";
+constexpr int kNoPipelineCheck = 3; // the child's exit code where no backend offers the check
 
 // The server's workers. A request holds one for its whole life: an event stream for as long as a UI
 // is open, a chat turn while it runs and while it waits its place in line. Those are bounded
@@ -176,6 +189,8 @@ struct Options {
     std::string feed_url = kFeedUrl;              // the release feed, read only when a person asks
     long parent_pid = 0;                          // --parent-pid: stop when that process is gone
     std::string probe_device;                     // internal: this process IS such a child; probe this device and exit
+    bool vulkan_report = false;                   // internal: this process is the Vulkan report's child
+    bool vulkan_pipelines = false;                // internal: this process is the pipeline check's child
     std::map<std::string, std::string> launch;    // engine parameters given on the command line
 };
 
@@ -327,6 +342,10 @@ int parse_args(int argc, char ** argv, Options & o) {
             o.isolated_probes = false;
         else if (a == "--probe-device")
             o.probe_device = next();
+        else if (a == "--vulkan-report")
+            o.vulkan_report = true;
+        else if (a == "--vulkan-pipelines")
+            o.vulkan_pipelines = true;
         else if (a == "--hf-endpoint") {
             o.hf_endpoint = next();
             while (!o.hf_endpoint.empty() && o.hf_endpoint.back() == '/')
@@ -1842,6 +1861,63 @@ void register_routes(httplib::Server & svr, App & app) {
     const auto reply = [](httplib::Response & res, const UpdateService::Reply & r) {
         send_json(res, r.body, r.status);
     };
+    // What the Vulkan stack says about itself (frontend/vulkan_report.h), asked in a child process: a
+    // driver that crashes on one of the questions ends that process, and the lines before it are the
+    // answer. The text is the Plan screen's to copy into a report.
+    svr.Get("/api/diagnostics/vulkan", [&](const httplib::Request &, httplib::Response & res) {
+        std::string out, why;
+        run_self_child({"--vulkan-report"}, kVulkanReportSeconds, out, why);
+        const std::string marker = std::string(frontend::vulkan_report_marker) + " ";
+        std::string text;
+        size_t at = 0;
+        while (at < out.size()) {
+            size_t end = out.find('\n', at);
+            if (end == std::string::npos) end = out.size();
+            const std::string line = out.substr(at, end - at);
+            if (line.compare(0, marker.size(), marker) == 0) text += line.substr(marker.size()) + "\n";
+            at = end + 1;
+        }
+        if (!why.empty()) text += "vulkan.report-process: " + why + "\n";
+        // Then the backend's own pipelines, in a process of their own: a driver that ends it there still
+        // leaves the report above, and the last pipeline it started names the one it ended on.
+        std::string pout, pwhy;
+        run_self_child({"--vulkan-pipelines"}, kVulkanPipelineSeconds, pout, pwhy);
+        const std::string pm = std::string(kVulkanPipelineMarker) + " ";
+        size_t checked = 0;
+        std::string refused, last_started;
+        for (size_t at = 0; at < pout.size();) {
+            size_t end = pout.find('\n', at);
+            if (end == std::string::npos) end = pout.size();
+            const std::string line = pout.substr(at, end - at);
+            at = end + 1;
+            if (line.compare(0, pm.size(), pm) != 0) continue;
+            std::istringstream in(line.substr(pm.size()));
+            std::string dev, name, status;
+            in >> dev >> name;
+            std::getline(in, status);
+            if (!status.empty() && status[0] == ' ') status.erase(0, 1);
+            if (status == "start") {
+                last_started = dev + " " + name;
+                continue;
+            }
+            last_started.clear();
+            ++checked;
+            if (status != "ok")
+                refused += "pipelines.refused: " + dev + " " + name + ": " + status.substr(0, 200) + "\n";
+        }
+        const std::string no_check = "it exited with " + std::to_string(kNoPipelineCheck);
+        if (checked == 0 && pwhy == no_check) {
+            text += "pipelines: not checked (no backend here offers the check)\n";
+        } else {
+            text += "pipelines.checked: " + std::to_string(checked) + " (" +
+                    std::to_string(std::count(refused.begin(), refused.end(), '\n')) +
+                    " refused; every pipeline the backend registers)\n" + refused;
+            if (!pwhy.empty())
+                text += "pipelines.process: " + pwhy +
+                        (last_started.empty() ? "" : ", while creating " + last_started) + "\n";
+        }
+        send_json(res, json{{"text", text}, {"complete", why.empty() && (pwhy.empty() || pwhy == no_check)}});
+    });
     svr.Get("/api/backends", [&, reply](const httplib::Request & req, httplib::Response & res) {
         reply(res, app.updates->backends(req.get_param_value("refresh") == "1"));
     });
@@ -1937,6 +2013,16 @@ int run(int argc, char ** argv, const Embedding & embedding) {
     Options o;
     const int rc = parse_args(argc, argv, o);
     if (rc >= 0) return rc;
+    // The Vulkan report's child (/api/diagnostics/vulkan): before any backend loads or any socket is
+    // bound, so what it asks the driver is all this process does. Each line carries the marker, so the
+    // parent keeps exactly these lines out of whatever else the driver writes to the same stream.
+    if (o.vulkan_report) {
+        const bool ok = frontend::vulkan_report([](const std::string & line) {
+            std::printf("%s %s\n", frontend::vulkan_report_marker, line.c_str());
+            std::fflush(stdout);
+        });
+        return ok ? 0 : 1;
+    }
     if (!o.log_file.empty()) {
         // From here on everything the console would have shown goes to the file, this start's own
         // lines included; what came before (an argument refused) was for whoever typed it.
@@ -1950,9 +2036,11 @@ int run(int argc, char ** argv, const Embedding & embedding) {
     // The socket is bound before any slow start-up work (loading the compute backends, which on some
     // machines compiles a GPU library for tens of seconds): the port is the server's from here, a
     // client that connects meanwhile waits in the listen queue until the server serves, and --port 0
-    // reports the port it took at once. A device probe's child serves nothing and binds nothing.
+    // reports the port it took at once. A device probe's child and the pipeline check's child serve
+    // nothing and bind nothing: the server that started them holds the port.
     httplib::Server svr;
-    if (o.probe_device.empty()) {
+    const bool serves = o.probe_device.empty() && !o.vulkan_pipelines;
+    if (serves) {
         // A worker is held for a request's whole life, and a connection past the queue is closed at
         // once instead of waiting with no bound behind workers that may not come free.
         svr.new_task_queue = [] { return new httplib::ThreadPool(kWorkerThreads, 0, kMaxQueuedRequests); };
@@ -2019,6 +2107,16 @@ int run(int argc, char ** argv, const Embedding & embedding) {
     if (load_backends) {
         platform::prepare_backend_modules(extra_backend_modules(platform::executable_dir(), pack_dirs));
         register_backends(pack_dirs);
+    }
+    // The pipeline check's child (/api/diagnostics/vulkan): each pipeline's name before it is created
+    // and its outcome after, flushed, so the parent knows which one a driver that ends the process was on.
+    if (o.vulkan_pipelines) {
+        const bool asked = check_backend_pipelines(
+            kVulkanPipelinePrefixes, [](const std::string & dev, const std::string & name, const std::string & status) {
+                std::printf("%s %s %s %s\n", kVulkanPipelineMarker, dev.c_str(), name.c_str(), status.c_str());
+                std::fflush(stdout);
+            });
+        return asked ? 0 : kNoPipelineCheck;
     }
     // The child of an isolated device probe: one device, its facts on one line, nothing else. If
     // the driver ends this process, or it never returns, that is the parent's answer about the device.

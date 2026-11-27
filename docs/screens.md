@@ -363,7 +363,9 @@ the same thing and a stage or role added later reaches them all unchanged.
   without becoming the person's), the command line, and Copy diagnostic: the command and the
   planner's whole account (`explain`) on the clipboard, for a bug report. The account is not shown:
   every line of it has a worded twin on the screen. Beside it, a link to how the planner decides
-  ([hardware-planning.md](hardware-planning.md)). With nothing loaded and no plan to show, the
+  ([hardware-planning.md](hardware-planning.md)). Copy Vulkan report, shown whether or not there is a
+  plan, asks the server for what the Vulkan driver says about itself (`GET /api/diagnostics/vulkan`,
+  seconds, in a child process) and puts the text on the clipboard. With nothing loaded and no plan to show, the
   decisions the settings carry from the last applied plan, grouped the same way.
 - **With nothing loaded**, the decisions the configuration carries from the last applied plan are
   shown, grouped the same way, so the screen is never empty after a plan has been made.

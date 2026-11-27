@@ -495,6 +495,13 @@ export interface ChatMessage {
 }
 
 /** `POST /api/decide`: which of the choices the model would answer next, from one prefill. */
+/** What the Vulkan stack says about itself (GET /api/diagnostics/vulkan): text to copy into a report.
+ *  `complete` is false when the child that asked ended early; `text` then stops at that step. */
+export interface VulkanReport {
+  text: string;
+  complete: boolean;
+}
+
 export interface DecideResult {
   cancelled: boolean;
   best: number;
