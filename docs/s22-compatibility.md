@@ -151,6 +151,30 @@ invocations (`1024x1024x64`), subgroup size 64, no clustered subgroup operations
   phone's to show.** If another pipeline is refused, the reason will now name it: the probe's last
   words lead with ggml-vulkan's "compute pipeline creation failed for <name>" line.
 
+### Still refused, and every pipeline asked at once (fork commit `d5dde4318`)
+
+With `d486a5759` the phone's probe still ended the same way (`createComputePipeline: ErrorUnknown`).
+Its reason did not carry ggml's "creation failed for <name>" line, so which pipeline it was is not
+known: the q4_K mat-vec still refused at workgroup 16, or another one. On the same run the plan put
+the prefill on OpenCL (1.3x the cores, same results) and the decode on the cores, streaming the experts
+with a 4346 MiB cache.
+
+Two changes, so one more run answers it:
+- The pipeline's name now travels in the exception's own text, the line that does reach the reason:
+  `... ErrorUnknown (pipeline <name>)`.
+- `ggml_backend_vk_check_pipelines` (fork) and `check_backend_pipelines` (`core/src/plan/pipeline_probe.cpp`)
+  create every pipeline of a family one at a time and report each one. "Copy Vulkan report" now ends
+  with that check, run in a process of its own after the report: 1333 pipelines in f32, f16, q4_0,
+  q8_0, q4_K, q5_K and q6_K (mat-vec, mat-vec by expert, matmul, and the graph's other kernels). It
+  lists every one the driver refuses, or the one it was creating when the driver ended the process.
+  About two minutes on a software rasterizer; up to five allowed.
+
+Host test: the S22 shim gains `S22_REFUSE_WG_GE=N`, which refuses any pipeline whose workgroup
+constant is N or more. That is #28635's condition, applied to every shader rather than the q4_K one
+alone. With it at 32 and the Qualcomm driver id reported, the q4_K mat-vec pipelines all pass
+(workgroup 16), the q6_K ones are listed as refused, and the endpoint returns the report with the
+refused names.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
@@ -255,6 +279,6 @@ which is account-walled and not redistributable, so a build here cannot include 
 
 ### Fork commits pinned
 
-`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849` and `d486a5759` on `Eun-si123/llama.cpp`
+`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849`, `d486a5759` and `d5dde4318` on `Eun-si123/llama.cpp`
 `s22/vk-device-api-gate`, on top of the two upstream hooks (`docs/seam.md`). Unverified on an Adreno
 730. No release or speed claim follows from these changes alone.

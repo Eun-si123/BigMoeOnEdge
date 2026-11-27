@@ -425,5 +425,7 @@ device that reports a device API below 1.2, on every path that picks a device, i
 device when it is the only Vulkan device, and drops the second commit's unconditional KHR fallback
 (`docs/s22-compatibility.md`). A fourth (`8644cb849`) drives a device that reports below 1.2 through its
 KHR/EXT extensions instead of skipping it. A fifth (`d486a5759`) builds the q4_K mat-vec pipelines at
-workgroup 16 on Qualcomm's proprietary driver, whose compiler refuses them at 32 and above. Again
-backend-only: no engine API changes.
+workgroup 16 on Qualcomm's proprietary driver, whose compiler refuses them at 32 and above. A sixth
+(`d5dde4318`) names a refused pipeline in the exception's text and exports
+`ggml_backend_vk_check_pipelines` through `ggml_backend_reg_get_proc_address`, which
+`core/src/plan/pipeline_probe.cpp` calls when it is there. Again backend-only: no engine API changes.

@@ -1439,7 +1439,12 @@ creates it and again with the KHR extensions enabled; then the calls themselves,
 pointer that resolved. A line `step: ...` precedes each call that could end the process. When the
 child ends early, `complete` is false and the text stops at the step that did it, followed by
 `vulkan.report-process: it ended with signal 11, SIGSEGV`. Only values the Vulkan API returns are
-printed. `bmoe-cli --vulkan-report` prints the same text in its own process. The Plan screens (web and
+printed. Then, in a second child (`--vulkan-pipelines`, up to 300 s), the backend's own pipelines are
+created one at a time through the fork's `ggml_backend_vk_check_pipelines`. These are the families a
+language model's graph uses, in f32, f16, q4_0, q8_0, q4_K, q5_K and q6_K. The text ends with
+`pipelines.checked: N (M refused; ...)` and one `pipelines.refused: <device> <pipeline>: <error>` line per
+refusal, or `pipelines.process: <how it ended>, while creating <pipeline>`. A build whose Vulkan backend
+lacks the check says `pipelines: not checked`. `bmoe-cli --vulkan-report` prints the same text in its own process. The Plan screens (web and
 Android) copy it with "Copy Vulkan report".
 
 ## Backend packs and updates

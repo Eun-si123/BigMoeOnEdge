@@ -167,8 +167,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice d, const VkDevice
     restore(c, n);
     return r;
 }
+// S22_REFUSE_WG_GE=N: vkCreateComputePipelines answers VK_ERROR_UNKNOWN for a pipeline whose
+// specialization constant 0 (ggml's workgroup size) is N or more, as llama.cpp #28635 narrows the
+// Adreno compiler's refusal of the q4_K mat-vec down to (there for that shader alone).
+static PFN_vkCreateComputePipelines real_ccp;
+static VKAPI_ATTR VkResult VKAPI_CALL my_ccp(VkDevice d, VkPipelineCache c, uint32_t n,
+                                              const VkComputePipelineCreateInfo *ci, const VkAllocationCallbacks *a,
+                                              VkPipeline *out) {
+    const char *ge = getenv("S22_REFUSE_WG_GE");
+    for (uint32_t i = 0; ge && i < n; ++i) {
+        const VkSpecializationInfo *si = ci[i].stage.pSpecializationInfo;
+        for (uint32_t k = 0; si && k < si->mapEntryCount; ++k)
+            if (si->pMapEntries[k].constantID == 0 && si->pMapEntries[k].size == 4 &&
+                *(const uint32_t *) ((const char *) si->pData + si->pMapEntries[k].offset) >= (uint32_t) atoi(ge))
+                return VK_ERROR_UNKNOWN;
+    }
+    return real_ccp(d, c, n, ci, a, out);
+}
+
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice dev, const char *n) {
     if (is_promoted(n)) return NULL;
+    if (!strcmp(n, "vkCreateComputePipelines")) {
+        real_ccp = (PFN_vkCreateComputePipelines) ((PFN_vkGetDeviceProcAddr) real("vkGetDeviceProcAddr"))(dev, n);
+        return (PFN_vkVoidFunction) my_ccp;
+    }
     return ((PFN_vkGetDeviceProcAddr) real("vkGetDeviceProcAddr"))(dev, n);
 }
 
@@ -186,5 +208,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance i, con
     if (!strcmp(n, "vkGetPhysicalDeviceProperties2KHR")) return (PFN_vkVoidFunction) vkGetPhysicalDeviceProperties2;
     if (!strcmp(n, "vkGetPhysicalDeviceFeatures2KHR")) return (PFN_vkVoidFunction) vkGetPhysicalDeviceFeatures2;
     if (i && is_promoted(n)) return (PFN_vkVoidFunction) jump_to_zero;
+    if (i && !strcmp(n, "vkCreateComputePipelines")) {
+        real_ccp = (PFN_vkCreateComputePipelines) ((PFN_vkGetInstanceProcAddr) real("vkGetInstanceProcAddr"))(i, n);
+        return (PFN_vkVoidFunction) my_ccp;
+    }
     return ((PFN_vkGetInstanceProcAddr) real("vkGetInstanceProcAddr"))(i, n);
 }

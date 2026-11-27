@@ -196,7 +196,8 @@ core/
                   layer_probe (one real layer of the model, its experts and its dense matrices, on
                   every backend: measured-planning.md, Step 3), gate_probe,
                   device_probe, placement_probe, isolated_probe (a device asked in a second
-                  process, so a driver that ends it ends only that), native_memory_probe,
+                  process, so a driver that ends it ends only that), pipeline_probe (a backend's
+                  pipelines created one at a time, the ones its driver refuses named), native_memory_probe,
                   metal_memory_probe, opencl_memory_probe and memory_topology (whether a device
                   shares the host's memory, from its own API) - the adapters that
                   measure a machine and read a gguf; the only place in the planner where a platform

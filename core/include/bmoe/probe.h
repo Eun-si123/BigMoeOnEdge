@@ -240,6 +240,15 @@ bool run_self_child(const std::vector<std::string> & args,
                     std::string & out,
                     std::string & why);
 
+// The compute pipelines whose name starts with one of the comma-separated `prefixes`, created one at
+// a time on every device whose backend offers the check (this engine's llama.cpp fork exports it for
+// Vulkan), each reported as `report(device, pipeline, status)`: "start" before it is created - a
+// driver that ends the process there leaves that as its last word - then "ok" or the driver's error.
+// False where no backend offers the check. Backends must be registered first.
+using PipelineReport =
+    std::function<void(const std::string & device, const std::string & pipeline, const std::string & status)>;
+bool check_backend_pipelines(const std::string & prefixes, const PipelineReport & report);
+
 // How much memory this process can hold and expect to keep, which is not what the machine reports
 // as available: where a reclaim compresses, that figure is a floor for what could be taken and an
 // over-promise for what could be kept. Fills hw.holdable_bytes, or leaves it 0 where this machine

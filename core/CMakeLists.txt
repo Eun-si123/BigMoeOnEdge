@@ -56,6 +56,7 @@ if(BMOE_HAVE_LLAMA)
         src/plan/gate_probe.cpp
         src/plan/device_probe.cpp
         src/plan/isolated_probe.cpp
+        src/plan/pipeline_probe.cpp
         src/plan/storage_probe.cpp
         src/plan/placement_probe.cpp
         src/plan/model_probe.cpp
