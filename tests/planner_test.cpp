@@ -2796,6 +2796,29 @@ int main() {
               "isolated: an unknown step name is ignored, not echoed");
         check(last_probe_stage("").empty() && last_probe_stage("no markers at all").empty(),
               "isolated: no marker, no step");
+        // What it said last, with its directories cut: ggml's abort, and both runtimes' uncaught exception.
+        const std::string ggml_abort_out =
+            mk + " bandwidth\nggml_vulkan: Found 1 Vulkan devices:\n"
+                 "/home/someone/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp:8655: "
+                 "Requested preallocation size is too large\n#0 0x7f00 in ggml_abort (/data/app/x/lib.so)\n";
+        check(probe_last_words(ggml_abort_out) == "ggml-vulkan.cpp:8655: Requested preallocation size is too large",
+              "isolated: a ggml abort is named by file, line and message, its directories cut",
+              probe_last_words(ggml_abort_out));
+        check(probe_last_words("x\nlibc++abi: terminating due to uncaught exception of type vk::DeviceLostError: "
+                               "vk::Queue::submit: ErrorDeviceLost\n") ==
+                  "libc++abi: terminating due to uncaught exception of type vk::DeviceLostError: vk::Queue::submit: "
+                  "ErrorDeviceLost",
+              "isolated: libc++abi's uncaught exception is named");
+        check(probe_last_words("terminate called after throwing an instance of 'vk::SystemError'\n  what():  "
+                               "vk::Device::createComputePipeline: ErrorUnknown\n") ==
+                  "terminate called after throwing an instance of 'vk::SystemError' what(): "
+                  "vk::Device::createComputePipeline: ErrorUnknown",
+              "isolated: libstdc++'s terminate and its what() are one sentence");
+        check(probe_last_words("GGML_ASSERT ok?\nsome driver line /vendor/lib64/x.so\n").empty() &&
+                  probe_last_words("").empty() && probe_last_words("no such thing:12: here").empty(),
+              "isolated: nothing else is taken for last words");
+        check(probe_last_words(std::string("/a/b.cpp:1: ") + std::string(400, 'x')).size() <= 243,
+              "isolated: last words are bounded");
         check(std::string(signal_name(11)) == "SIGSEGV" && std::string(signal_name(6)) == "SIGABRT" &&
                   std::string(signal_name(1000)).empty(),
               "isolated: signals are named where the list knows them");

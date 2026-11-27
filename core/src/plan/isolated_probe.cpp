@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace bmoe {
 
@@ -69,6 +71,66 @@ std::string last_probe_stage(const std::string & out) {
             if (id == s.id) says = s.says;
     }
     return says;
+}
+
+namespace {
+
+bool is_source_line(const std::string & l) {
+    // "<path>/ggml-vulkan.cpp:5455: message": a source file, a line number, then the message.
+    const size_t colon = l.find(':');
+    if (colon == std::string::npos || colon == 0) return false;
+    const std::string file = l.substr(0, colon);
+    if (file.find(' ') != std::string::npos) return false;
+    static const char * const exts[] = {".c", ".cpp", ".cc", ".h", ".hpp", ".m", ".mm", ".cu"};
+    bool source = false;
+    for (const char * e : exts) {
+        const size_t n = std::strlen(e);
+        source = source || (file.size() > n && file.compare(file.size() - n, n, e) == 0);
+    }
+    size_t i = colon + 1;
+    const size_t digits = i;
+    while (i < l.size() && l[i] >= '0' && l[i] <= '9')
+        ++i;
+    return source && i > digits && i < l.size() && l[i] == ':';
+}
+
+std::string sanitized(const std::string & l) {
+    std::string out;
+    std::istringstream words(l);
+    std::string w;
+    while (words >> w) {
+        const size_t slash = w.find_last_of("/\\");
+        if (slash != std::string::npos) w = w.substr(slash + 1);
+        for (char & c : w)
+            if ((unsigned char) c < 0x20 || (unsigned char) c > 0x7e) c = '?';
+        out += (out.empty() ? "" : " ") + w;
+    }
+    constexpr size_t k_max = 240;
+    if (out.size() > k_max) out = out.substr(0, k_max) + "...";
+    return out;
+}
+
+} // namespace
+
+std::string probe_last_words(const std::string & out) {
+    std::vector<std::string> lines;
+    std::istringstream in(out);
+    std::string l;
+    while (std::getline(in, l)) {
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        lines.push_back(l);
+    }
+    std::string said;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string & s = lines[i];
+        if (s.find("libc++abi: terminating") != std::string::npos || s.find("terminate called") != std::string::npos ||
+            s.find("GGML_ASSERT(") != std::string::npos || is_source_line(s))
+            said = s;
+        else if (s.find("what():") != std::string::npos && !said.empty() && i > 0 &&
+                 lines[i - 1].find("terminate called") != std::string::npos)
+            said = lines[i - 1] + " " + s;
+    }
+    return said.empty() ? "" : sanitized(said);
 }
 
 const char * signal_name(int sig) {
@@ -220,7 +282,9 @@ DeviceProbeRunner self_process_runner(std::function<std::vector<std::string>(con
         std::string out;
         const pio::ChildResult r = pio::run_self(argv_for(device), timeout_seconds, &out);
         const std::string stage = last_probe_stage(out);
-        const std::string where = stage.empty() ? "" : ", " + stage;
+        const std::string words = probe_last_words(out);
+        const std::string where =
+            (stage.empty() ? "" : ", " + stage) + (words.empty() ? "" : "; it said: \"" + words + "\"");
         if (r.outcome == pio::ChildOutcome::TimedOut) {
             char b[96];
             std::snprintf(b, sizeof(b), "its probe did not finish in %.0f s and was stopped", timeout_seconds);

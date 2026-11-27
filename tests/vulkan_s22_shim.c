@@ -6,7 +6,8 @@
 //   - vkGetDeviceProcAddr: 1.2/1.3-core names -> NULL, KHR names as the driver answers them
 //   - vkGetInstanceProcAddr: 1.2/1.3-core device names -> a stub that jumps to address 0 (the
 //     loader's trampoline into an empty dispatch slot), KHR names as the driver answers them
-// Knobs: S22_HIDE_EXT="VK_A,VK_B" hides device extensions; S22_NO_INT64=1 clears shaderInt64.
+// Knobs: S22_HIDE_EXT="VK_A,VK_B" hides device extensions; S22_NO_INT64=1 clears shaderInt64;
+// S22_MAX_SBR / S22_MAX_ALLOC lower maxStorageBufferRange / maxMemoryAllocationSize (bytes).
 //
 // Not built by CMake: it is a manual tool for a machine with a Vulkan driver (docs/s22-compatibility.md).
 //   cc -shared -fPIC tests/vulkan_s22_shim.c -o s22shim.so -ldl
@@ -95,6 +96,15 @@ static void restore(Cut *c, int n) {
 static void lower(VkPhysicalDeviceProperties *p) {
     p->apiVersion = VK_MAKE_API_VERSION(0, 1, 1, 128);
     p->deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+    const char *sbr = getenv("S22_MAX_SBR");
+    if (sbr) p->limits.maxStorageBufferRange = (uint32_t) strtoull(sbr, NULL, 0);
+}
+// S22_MAX_ALLOC lowers VkPhysicalDeviceMaintenance3Properties::maxMemoryAllocationSize.
+static void lower_chain(VkPhysicalDeviceProperties2 *p) {
+    const char *ma = getenv("S22_MAX_ALLOC");
+    for (VkBaseOutStructure *s = (VkBaseOutStructure *) p->pNext; s && ma; s = s->pNext)
+        if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES)
+            ((VkPhysicalDeviceMaintenance3Properties *) s)->maxMemoryAllocationSize = strtoull(ma, NULL, 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice d, VkPhysicalDeviceProperties *p) {
@@ -107,6 +117,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice d, Vk
     ((PFN_vkGetPhysicalDeviceProperties2) real("vkGetPhysicalDeviceProperties2"))(d, p);
     restore(c, n);
     lower(&p->properties);
+    lower_chain(p);
 }
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d, VkPhysicalDeviceFeatures2 *f) {
     Cut c[MAXU];

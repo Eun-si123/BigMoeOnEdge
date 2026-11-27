@@ -399,6 +399,28 @@ void report_device(
     emit(key + ".api-version: " + version(p.apiVersion) + " (" + hex(p.apiVersion) + ")");
     emit(key + ".driver-version: " + hex(p.driverVersion));
     emit(key + ".vendor-device: " + hex(p.vendorID) + " " + hex(p.deviceID));
+    // The limits a backend sizes its bindings, shaders and allocations by: a tensor past the storage
+    // range is unsupported without 64-bit indexing, and shared memory and workgroup size pick tiles.
+    {
+        const VkPhysicalDeviceLimits & l = p.limits;
+        emit(key + ".limits: maxStorageBufferRange=" + std::to_string(l.maxStorageBufferRange) +
+             " maxComputeSharedMemorySize=" + std::to_string(l.maxComputeSharedMemorySize) +
+             " maxComputeWorkGroupInvocations=" + std::to_string(l.maxComputeWorkGroupInvocations) +
+             " maxComputeWorkGroupSize=" + std::to_string(l.maxComputeWorkGroupSize[0]) + "x" +
+             std::to_string(l.maxComputeWorkGroupSize[1]) + "x" + std::to_string(l.maxComputeWorkGroupSize[2]) +
+             " maxPushConstantsSize=" + std::to_string(l.maxPushConstantsSize) +
+             " maxMemoryAllocationCount=" + std::to_string(l.maxMemoryAllocationCount) +
+             " minStorageBufferOffsetAlignment=" + std::to_string(l.minStorageBufferOffsetAlignment));
+    }
+    if (auto mem_fn = in.get<PFN_vkGetPhysicalDeviceMemoryProperties>("vkGetPhysicalDeviceMemoryProperties")) {
+        VkPhysicalDeviceMemoryProperties mp{};
+        mem_fn(pd, &mp);
+        std::string heaps;
+        for (uint32_t i = 0; i < mp.memoryHeapCount; ++i)
+            heaps += (heaps.empty() ? "" : " ") + std::to_string(mp.memoryHeaps[i].size >> 20) + "MiB" +
+                     ((mp.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) ? "(device-local)" : "");
+        emit(key + ".memory-heaps: " + heaps);
+    }
 
     uint32_t n = 0;
     ext_fn(pd, nullptr, &n, nullptr);
@@ -421,6 +443,16 @@ void report_device(
         props2_fn(pd, &p2);
         emit(key + ".driver: id=" + std::to_string((int) drv.driverID) + " name=" + drv.driverName +
              " info=" + drv.driverInfo);
+        auto m3 = vk_struct<VkPhysicalDeviceMaintenance3Properties>(
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES);
+        auto sg = vk_struct<VkPhysicalDeviceSubgroupProperties>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES);
+        m3.pNext = &sg;
+        auto q2 = vk_struct<VkPhysicalDeviceProperties2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+        q2.pNext = &m3;
+        props2_fn(pd, &q2);
+        emit(key + ".limits2: maxMemoryAllocationSize=" + std::to_string(m3.maxMemoryAllocationSize) +
+             " subgroupSize=" + std::to_string(sg.subgroupSize) + " subgroupOps=" + hex(sg.supportedOperations) +
+             " subgroupStages=" + hex(sg.supportedStages));
         emit(key + ".conformance: " + std::to_string(drv.conformanceVersion.major) + "." +
              std::to_string(drv.conformanceVersion.minor) + "." + std::to_string(drv.conformanceVersion.subminor) +
              "." + std::to_string(drv.conformanceVersion.patch));

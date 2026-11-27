@@ -330,6 +330,8 @@ void probe_bandwidth(HardwareProfile & hw, const ModelProfile & model) {
         break;
     }
 
+    Probe small;                        // built only for a device the full matrix does not run on
+    std::vector<float> small_reference; // the host's result on it
     for (ComputeDevice & d : hw.devices) {
         if (d.is_cpu || !d.probe_here()) continue;
         ggml_backend_dev_t dev = ggml_backend_dev_by_name(d.name.c_str());
@@ -341,7 +343,27 @@ void probe_bandwidth(HardwareProfile & hw, const ModelProfile & model) {
         if (d.has_own_memory() && d.memory_free && d.memory_free < needed * 4) continue;
 
         const RunResult own = run_gemv(dev, probe, 0, false);
-        if (!own.ok) continue;
+        if (!own.ok) {
+            // A device that will not take the full matrix in one binding (a phone GPU's storage range
+            // was smaller than a dense model's F32 probe) is still asked whether it computes the
+            // host's result, on the wide instrument's smaller matrix at one token. Its rate stays
+            // unmeasured: a matrix that size can sit in a cache, and a cache's figure is not this one.
+            if (small_reference.empty() && build_probe(small, probe.type, k_wide_rows)) {
+                for (ComputeDevice & h : hw.devices) {
+                    ggml_backend_dev_t hd = h.is_cpu ? ggml_backend_dev_by_name(h.name.c_str()) : nullptr;
+                    const RunResult hr = hd ? run_gemv(hd, small, (int) hw.best_threads, false) : RunResult{};
+                    if (hr.ok) {
+                        small_reference = hr.out;
+                        break;
+                    }
+                }
+            }
+            if (!small_reference.empty()) {
+                const RunResult sr = run_gemv(dev, small, 0, false);
+                if (sr.ok) d.identity_ok = agrees(sr.out, small_reference) ? Tri::Yes : Tri::No;
+            }
+            continue;
+        }
         d.memory_bandwidth_gibs = own.gibs;
 
         // Correctness before speed. Without a reference nothing can be concluded, and an unproven

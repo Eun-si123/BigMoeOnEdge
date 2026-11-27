@@ -77,6 +77,48 @@ What follows for the backend:
 Still open: the backend itself loading a model on this device, every real shader's pipeline (not
 only the report's four), and what the planner measures for it.
 
+### Plans on the phone with the 1.1 + KHR path (2026-11-27)
+
+The Vulkan device now registers and its probe runs; no SIGSEGV. Two models, as reported by the owner:
+
+| | Dense model (about 5 GB) | Qwen3.6-35B-A3B Q4_K_M (MoE) |
+| --- | --- | --- |
+| Vulkan0 | prompt-width probe 2.5x the cores; refused: "has not been shown to compute the host's results on this model" | **SIGABRT (signal 6) in the memory-rate step** (`bandwidth`); unusable |
+| OpenCL | refused on memory headroom | prompt 1.2x the cores, results agree: **armed for the prefill** |
+| Decode | cores (the model is dense: nothing streams) | cores; expert cache 3.9 GiB of a 7.2 GiB budget; direct I/O on, 4 read lanes; predicted 5.7 tok/s |
+
+**What the two runs measure differently** (`bandwidth_probe.cpp`, `layer_probe.cpp`):
+
+| | Dense | MoE |
+| --- | --- | --- |
+| One-token probe | **F32** 16384x4096, **256 MiB** in one tensor (a model with no expert type measures in F32) | the experts' type (Q4_K), 16384x4096, about 36 MiB |
+| Prompt-width probe | synthetic F32 4096x4096 at 512 tokens (64 MiB) | **the model's own layer** (`MUL_MAT_ID` on its Q4_K/Q6_K experts, about 64 MiB held, plus its dense matrices) at decode and prompt width |
+| Identity (same result as the cores) | the one-token probe only: the real-layer probe declines a model without experts | the real layer at decode width, and at prompt width |
+
+So the shaders differ (an F32 matvec against quantized `MUL_MAT_VEC`/`MUL_MAT_ID` paths), and so do the
+sizes (one 256 MiB binding against several bindings of a few to tens of MiB).
+
+- **Dense, "not shown":** reproduced on the host (lavapipe behind the shim with
+  `S22_MAX_SBR=134217728`). A device whose `maxStorageBufferRange` is below the 256 MiB F32 probe
+  declines it (`supports_op` false), so its identity stays Unknown, its rate 0, and the plan refuses
+  it on "not shown". Nothing measured it wrong; nothing measured it at all. The phone's actual range
+  is not known yet: the report now prints it.
+  Changed: such a device is now asked for identity on the wide instrument's smaller matrix (4096
+  rows) at one token, against the cores on the same bytes. Its rate stays unmeasured, because a
+  matrix that size can sit in a cache. The bound is unchanged; this is a comparison that now
+  happens, not a check skipped.
+- **MoE, SIGABRT:** not reproduced on the host. The same Q4_K_M expert mix (`llama-quantize` of a
+  1024-wide, 64-expert synthetic model) runs both probes there. That holds under the S22 shim with
+  coopmat hidden, with the storage range at 8 MiB, and with the allocation limit at 16 MiB. The real
+  layer agrees with the exact result (1.7e-13 at one token, 1.9e-5 at prompt width). With the range
+  at 8 MiB the expert ops are declined, not aborted. The real layer holds about 64 MiB of experts,
+  so a size limit is not the likely cause. A `GGML_ABORT` or an uncaught `vk::` exception (a
+  pipeline the Adreno compiler refuses, or a lost device) in one of the quantized shaders is. Both
+  print a line before the abort, which the probe kept and dropped.
+  Changed: the probe's reason now carries that line, cut to the source file's name and the message
+  (`probe_last_words`), e.g. `it said: "ggml-vulkan.cpp:8655: Requested preallocation size is too large"`.
+  The next run on the phone names the failing step.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
@@ -153,14 +195,12 @@ child's other output (driver logs, paths) does not.
 
 ### What to record on the phone
 
-1. Plan screen, "Copy Vulkan report": the whole text. The device version and the NULL commands are
-   settled, and SPIR-V 1.5 is taken (second report). What is open is whether `Vulkan0` now appears in
-   the Plan's devices as usable, and what the planner measured for it.
-2. Plan screen, "Device backends": each device's status and reason (now with signal and step). Whether
-   `Vulkan0` (Adreno 730) is used, refused on results or speed, or unusable, and why.
-3. For the 35B Q5_K_M first-load failure: the error text shown, and whether the engine process was
-   killed (`adb logcat | grep -i "lowmemorykiller\|lmkd"`) or ended with a signal. Not investigated
-   yet: no log of it exists.
+1. Plan screen, "Devices": Vulkan0's status and reason. A probe that aborts now ends its reason with
+   what the backend said (`it said: "..."`); that line is the next fix's input.
+2. Plan screen, "Copy Vulkan report": the whole text, now with `limits` (the storage range among
+   them), `limits2` and `memory-heaps`.
+3. For a first-load failure: the error text shown, and whether the engine process was killed
+   (`adb logcat | grep -i "lowmemorykiller\|lmkd"`) or ended with a signal.
 
 ### What a working GPU can be expected to give
 

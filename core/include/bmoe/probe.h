@@ -216,6 +216,12 @@ extern const char * const probe_stage_marker;
 std::string last_probe_stage(const std::string & child_output);
 // "SIGSEGV" for 11 and so on, "" for a signal this list does not name.
 const char * signal_name(int sig);
+// What a child that aborted said last, from the lines a runtime prints on the way down: ggml's
+// "file:line: message" (GGML_ABORT, GGML_ASSERT), libc++abi's "terminating due to uncaught exception
+// of type ...", libstdc++'s "terminate called ..." with its "what():". Directories are cut from every
+// path-like word, so only a source file's name survives, and the text is bounded. "" when no such
+// line is there: a driver's own output and a backtrace never reach the reason.
+std::string probe_last_words(const std::string & child_output);
 
 // A runner that starts this same executable again with `argv_for(device)` and gives it
 // `timeout_seconds` to answer. Fails - with the reason - when the child exits abnormally, runs out
