@@ -50,6 +50,33 @@ through `VkPhysicalDeviceVulkan12Features` (not defined for a 1.1 device: left u
 enables the KHR extensions, and calls the core names. Box #109's "1.3" on another Adreno 730 is
 probably that phone's loader version; it is not this phone's device version.
 
+### Second report from the phone (report with KHR-only calls and SPIR-V pipelines, 2026-11-27)
+
+Same device: Adreno 730, API 1.1.128, loader 1.4.0, driver id 8 (Qualcomm proprietary), 90 device
+extensions offered.
+
+| Item | Value |
+| --- | --- |
+| Features (through the extensions' structs) | bufferDeviceAddress, timelineSemaphore, storageBuffer16BitAccess, storageBuffer8BitAccess, shaderInt8, shaderFloat16: yes. **shaderInt64: no** |
+| Offered | `KHR_spirv_1_4`, `KHR_shader_float_controls`, `KHR_vulkan_memory_model`, `EXT_scalar_block_layout`, `KHR_shader_subgroup_extended_types`, `KHR_uniform_buffer_standard_layout`, `EXT_host_query_reset`, `EXT_subgroup_size_control`, `KHR_driver_properties` |
+| Not offered | `EXT_external_memory_host`, `EXT_memory_budget`, `KHR_shader_integer_dot_product`, `KHR_cooperative_matrix`, `EXT_pipeline_robustness`, `KHR_maintenance4` |
+| Logical device with the KHR extensions enabled | created |
+| `vkGetBufferDeviceAddressKHR` / timeline commands through the device | resolved, called: non-zero address; signal, read and wait succeed |
+| Compute pipelines from SPIR-V **1.3 and 1.5** modules (plain, and with 8/16-bit storage, Int8, Float16, subgroup arithmetic) | **all four created** |
+
+What follows for the backend:
+- The SPIR-V 1.5 shaders ggml ships are taken by this driver below 1.2, at least for the capabilities
+  most of them declare. A SPIR-V 1.3 shader set is not needed, and is not built.
+- With no `shaderInt64`, the four `_bda` shader variants are not used. The backend gates them on
+  int64 and BDA together, which is the path tested with `S22_NO_INT64`.
+- No host-pointer import (`EXT_external_memory_host`): uploads go through staging. No memory budget
+  extension: ggml estimates the budget itself.
+- No integer dot or cooperative matrix: the scalar shader paths, which are the only ones the Android
+  build carries anyway.
+
+Still open: the backend itself loading a model on this device, every real shader's pipeline (not
+only the report's four), and what the planner measures for it.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
@@ -91,8 +118,8 @@ header and its `OpCapability`/`OpExtension`):
 
 - All 1190 modules of the Android build are **SPIR-V 1.5** (`glslc --target-env=vulkan1.2`). By the
   spec, a 1.1 device takes SPIR-V 1.3, or 1.4 with `VK_KHR_spirv_1_4`. Whether the Adreno driver takes
-  1.5 below 1.2 is the open question. The report now creates a compute pipeline from a 1.3 and a 1.5
-  module, plain and with the capabilities below, to answer it on the phone.
+  1.5 below 1.2 was the open question; the phone's second report answers it: all four of its test
+  pipelines (SPIR-V 1.3 and 1.5) were created.
 - Capabilities (number of modules): StorageBuffer16BitAccess 984, StorageBuffer8BitAccess 711,
   Int8 564, Int16 398, Float16 344, GroupNonUniform 223, GroupNonUniformArithmetic 201, mixed float
   dot (VALVE) 170, Shuffle 18, Vote 7, Int64 4, PhysicalStorageBufferAddresses 4, Clustered 3,
@@ -104,7 +131,7 @@ header and its `OpCapability`/`OpExtension`):
 - Rebuilt for SPIR-V 1.3 (`--target-env=vulkan1.1`), 161 of 162 sources compile. `im2col`
   (convolutions, not used by these LLMs) needs 1.4 for a specialization-constant conversion. So a 1.3
   shader set is a viable fallback if the phone refuses 1.5. It would double the shader binaries
-  (about 35 MB more in the APK), so it is not built unless the report shows it is needed.
+  (about 35 MB more in the APK). The phone accepted 1.5, so it is not built.
 
 ### Vulkan report (`/api/diagnostics/vulkan`, "Copy Vulkan report")
 
@@ -127,8 +154,8 @@ child's other output (driver logs, paths) does not.
 ### What to record on the phone
 
 1. Plan screen, "Copy Vulkan report": the whole text. The device version and the NULL commands are
-   settled; what is open is the `device0.with-khr.spirv.*` lines (does the driver take SPIR-V 1.5
-   below 1.2) and whether `Vulkan0` now appears in the Plan's devices, and what the planner measured.
+   settled, and SPIR-V 1.5 is taken (second report). What is open is whether `Vulkan0` now appears in
+   the Plan's devices as usable, and what the planner measured for it.
 2. Plan screen, "Device backends": each device's status and reason (now with signal and step). Whether
    `Vulkan0` (Adreno 730) is used, refused on results or speed, or unusable, and why.
 3. For the 35B Q5_K_M first-load failure: the error text shown, and whether the engine process was
