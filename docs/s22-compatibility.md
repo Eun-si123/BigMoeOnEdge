@@ -305,7 +305,7 @@ on the phone), types q2_K..q6_K, q8_0, q4_0, f16:
 | Run | MUL_MAT | MUL_MAT_ID |
 | --- | --- | --- |
 | rewritten shaders, nothing refused | 967/967 | 505/505 |
-| quantized matmuls refused (dequant path) | 967/967 | 504/505 before the contiguity check (the failure: experts viewed with gaps); rerun pending |
+| quantized matmuls refused (dequant path) | 967/967 | 504/504 (experts viewed with gaps now go to the CPU: 504/505 before) |
 
 CPY 259/259 and GET_ROWS 236/236 with the rewritten q8_0 functions. Without the shim, some f16/f32
 cases fail on lavapipe's cooperative-matrix path, before these changes as after: not a path the phone
@@ -416,7 +416,7 @@ which is account-walled and not redistributable, so a build here cannot include 
 
 ### Fork commits pinned
 
-`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849`, `d486a5759` (reverted by `437dde482`), `d5dde4318` and
-`437dde482` on `Eun-si123/llama.cpp`
+`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849`, `d486a5759` (reverted by `437dde482`), `d5dde4318`,
+`437dde482`, `525db2870`, `2246879d7`, `ffdc6ccd9`, `2c4e1e569`, `7d59f7581` on `Eun-si123/llama.cpp`
 `s22/vk-device-api-gate`, on top of the two upstream hooks (`docs/seam.md`). Unverified on an Adreno
 730. No release or speed claim follows from these changes alone.
