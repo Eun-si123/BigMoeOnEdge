@@ -248,6 +248,50 @@ name, so "every matmul compiles" in the section below was wrong: those were not 
 4. OpenCL, which the plan already arms for the prompt (1.6x the cores, same results): its kernel
    choices for Q4_K/Q6_K and its decode rate.
 
+### Every pipeline checked: what the compiler refuses is 8-bit vectors (APK v8, 2026-11-27)
+
+With the fallback in place the phone measured Vulkan0 for the first time, with the host's results:
+**1.1x the cores on a prompt**. That was not used, because OpenCL measured 1.7x and the plan arms the
+fastest. The report's full check created **1966 pipelines, 957 refused**, every one with
+`createComputePipeline: ErrorUnknown`:
+
+| Family | Refused | Created |
+| --- | --- | --- |
+| quantized matmul (`matmul_quant_*`, `matmul_id_subgroup_quant_*`, `matmul_iq*`, FP4) | all | f32/f16/bf16 matmuls |
+| mat-vec (`mul_mat_vec_*`, `mul_mat_vec_id_*`) | q8_0, q2_K..q6_K, tq2_0, IQ*, FP4 | f32, f16, q4_0, q4_1, q5_0, q5_1 |
+| dequant to f16 | tq1_0, IQ*, FP4 | q4_0..q8_0, **q2_K..q6_K** |
+| get_rows | tq1_0, IQ2*, iq3_xxs, IQ4*, FP4 | the rest, iq3_s included |
+| copies / misc | `cpy_q8_0_f32`, iq4_nl copies and `set_rows`, `quantize_q8_1_x4`, `lightning_indexer_*` | `cpy_f32_q8_0`, the rest |
+
+**The common factor, by instruction** (`scripts/spirv-8bit-audit.py`): over the 152 modules whose
+outcome the phone reported (mat-vecs, dequants, get_rows, copies, quantize, matmuls), every refused
+module holds an 8-bit value as more than a scalar, and no created one does:
+
+- an **8-bit vector**: `unpack8(u32)` into `u8vec4`/`i8vec4` (every refused K-quant and q8_0
+  mat-vec, the IQ2/IQ3 grids, every quantized matmul, which carries all types' decoders in one shader);
+- an **8-bit array**: `int8_t` lookup tables (`kvalues_iq4nl`, FP4 tables, iq4_nl copies);
+- an **8-bit phi**: a `uint8_t` merged across branches (tq1_0).
+
+Scalar 8-bit loads from a buffer and their conversions compile (q8_0 dequant and get_rows, K-quant
+dequants), although the driver also reports `shaderInt8`. The capability alone does not separate the
+sets (the K-quant dequants declare `Int8` and compile); nor do the SPIR-V version (all 1.5, and the
+report's 1.3 and 1.5 test modules were both created) or specialization constants (q4_0's mat-vec
+uses the same ones as q4_K's). This is a finding about structure, not yet a confirmed cause: it is
+confirmed only when a rewritten module is created on the phone.
+
+**What changes (fork commit below):**
+1. **The K-quant mat-vecs without 8-bit vectors.** `mul_mat_vec_q{2..6}_k` read four packed values
+   with `vec4(unpack8(word))`; they now take `unpack8_vec4(word)`, the same four bytes extracted with
+   32-bit shifts. The values are identical on every device; the audit shows no 8-bit vector left in
+   any of their variants. These are the decode kernels of Q4_K_M / Q6_K models, by expert too.
+2. **A refused quantized matmul dequantizes instead of leaving the GPU.** The dequant shaders of the
+   K-quants and q4_0..q8_0 were created, and so were the f16 matmuls. A `MUL_MAT` whose quantized
+   matmul is refused now runs as dequant-to-f16 followed by the f16 matmul, which ggml-vulkan already
+   does for types without a matmul shader. `supports_op` accepts it only where the dequant shader and
+   the f16 matmul were both created and the f16 copy of the weight fits one storage buffer (128 MiB on
+   this phone). That excludes the experts of a large MoE (one tensor holds every expert), which stay
+   on the CPU for the prompt.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
