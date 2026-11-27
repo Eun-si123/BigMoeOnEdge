@@ -2784,6 +2784,22 @@ int main() {
                   h.devices[2].unusable_reason.find("signal 11") != std::string::npos,
               "isolated: a device that ended its probe is marked unusable, with the reason");
 
+        // Where a child died: the last step it named, from the fixed list only.
+        const std::string mk = probe_stage_marker;
+        const std::string died = mk + " devices\nggml_vulkan: Found 1 Vulkan devices\n" + mk + " model\n" + mk +
+                                 " support\nsome driver line /private/path\n";
+        check(last_probe_stage(died).find("first buffers") != std::string::npos,
+              "isolated: the reason names the last step the child entered", last_probe_stage(died));
+        check(last_probe_stage(died).find("/private") == std::string::npos,
+              "isolated: and none of the child's other output");
+        check(last_probe_stage(mk + " support\n" + mk + " /etc/passwd\n").find("first buffers") != std::string::npos,
+              "isolated: an unknown step name is ignored, not echoed");
+        check(last_probe_stage("").empty() && last_probe_stage("no markers at all").empty(),
+              "isolated: no marker, no step");
+        check(std::string(signal_name(11)) == "SIGSEGV" && std::string(signal_name(6)) == "SIGABRT" &&
+                  std::string(signal_name(1000)).empty(),
+              "isolated: signals are named where the list knows them");
+
         // And the plan: the broken device is kept out of the run, and the good one is still weighed.
         h.host_wide_matmul_gibs = 200.0;
         h.host_bandwidth_gibs = 100.0;

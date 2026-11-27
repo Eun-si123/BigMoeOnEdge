@@ -208,6 +208,15 @@ bool device_facts_from_text(const std::string & text, ComputeDevice & d);
 // output on the same stream.
 extern const char * const device_facts_marker;
 
+// The step a child was on, printed before each one so that a child which dies without an error -
+// a driver that calls a NULL function, an abort inside a backend - still says where. Only names
+// from a fixed list are printed and read back: the child's other output (paths, driver logs) never
+// reaches the reason. Returns "" when the output names no known step.
+extern const char * const probe_stage_marker;
+std::string last_probe_stage(const std::string & child_output);
+// "SIGSEGV" for 11 and so on, "" for a signal this list does not name.
+const char * signal_name(int sig);
+
 // A runner that starts this same executable again with `argv_for(device)` and gives it
 // `timeout_seconds` to answer. Fails - with the reason - when the child exits abnormally, runs out
 // of time or prints no facts; and, where this platform has no way to do it, returns a runner that

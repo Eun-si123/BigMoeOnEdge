@@ -27,6 +27,53 @@ See [external research and implementation references](research-references.md) fo
 | P2 | Optional app-local Turnip | No root/system driver replacement; verify loader, license, compatibility and fallback; only if system Vulkan cannot be made reliable |
 | P3 | Debug APK, regression gates, portable release | Build arm64 CPU/Vulkan/OpenCL; run existing host gates, real-device tests and independent regression checks before release |
 
+### Vulkan device API gate (second fork commit)
+
+Root-cause hypothesis, backed by sources but not yet confirmed on the target phone: the backend
+requires Vulkan 1.2 only from the *instance* (the loader). A device behind it can report 1.1; the
+backend then still calls 1.2-core device commands (buffer device address, timeline semaphores),
+which can resolve to NULL. That matches the crash signature in Box #109/#121 (Adreno 730,
+`pc 0`, in `ggml_vk_create_buffer`), and llama.cpp #28593 describes the same failure class on a
+Mali GPU that reports 1.1. Box #121 also explains why a NULL guard on the buffer-address command
+alone did not hold: the device's other 1.2 commands are just as missing.
+
+The fork commit `1aa23b22b` (branch `s22/vk-device-api-gate`) checks the device's `apiVersion` on
+all three paths that pick a device: the default list, the "first non-CPU device" fallback (which
+previously skipped every check), and `GGML_VK_VISIBLE_DEVICES`. A device below 1.2 is skipped with
+`ggml_vulkan: skipping <name>: device reports Vulkan X.Y.Z, the backend needs 1.2`, and the CPU is
+used. This does **not** make the GPU usable on such a driver: it turns a crash into a clear
+refusal. Support below 1.2 (the #28593 approach) was declined upstream and is not attempted here.
+
+Tested on the host only: lavapipe through an `LD_PRELOAD` shim that reports the device as a 1.1
+integrated GPU. A 1.1 device is skipped on all three paths; a 1.2+ device is still used, and the
+tiny MoE gives the same output as on the CPU. **Not tested on an Adreno 730.** If the S22 driver
+reports 1.2 or higher, this gate does not apply and the crash has another cause (see the
+diagnostics below).
+
+### Probe diagnostics
+
+The isolated device probe now prints the step it enters (`BMOE_PROBE_STAGE devices|model|support|
+bandwidth|costs`). When the child dies, the Plan screen's reason names the signal and the step, for
+example `its probe ended the process that ran it (signal 11, SIGSEGV), while the device was asked
+which operations it runs (its first buffers)`. Only names from a fixed list reach the reason; the
+child's other output (driver logs, paths) does not.
+
+### What to record on the phone
+
+1. Plan screen, "Device backends": each device's status and reason (now with signal and step).
+2. Whether `Vulkan0` (Adreno 730) still appears. If it is gone, the driver reports below 1.2;
+   `adb logcat | grep ggml_vulkan` shows the reported version.
+3. For the 35B Q5_K_M first-load failure: the error text shown, and whether the engine process was
+   killed (`adb logcat | grep -i "lowmemorykiller\|lmkd"`) or ended with a signal. Not investigated
+   yet: no log of it exists.
+
+### Hexagon v69 (not changed)
+
+The release APK carries Hexagon skels for v73-v81 only. PocketPal #960 records the same SIGABRT on an
+SM8450: fastrpc fails to load the v73 skel on the v69 DSP, and the abort follows. Here the probe runs
+in its own process, so the abort costs only time and the device is marked unusable. A v69 skel would
+need the Hexagon SDK and upstream backend support for v69; it is not attempted.
+
 First implementation: a separate llama.cpp fork commit resolves BDA and host-pointer-import commands per logical device and disables those optional paths if absent. It deliberately does not change the minimum Vulkan version or the global dispatcher. It is unverified on hardware. The parent repository pins that commit; upstream expert-ready and Hexagon hooks are preserved. No release or speed claim follows from this change alone.
 
 Baseline comparisons: use the same model, quantization, prompt, context, token budget and sampling seed; record backend selection, prefill/decode rates separately, peak memory, cache hit rate and I/O wait. Run small-model smoke tests before large streamed models; compare streamed vs resident where memory permits. Keep experimental changes separate and retain a CPU-only escape path.

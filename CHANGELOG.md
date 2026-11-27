@@ -9,6 +9,8 @@ Semantic Versioning.
 ### Changed
 - Downstream experimental Vulkan optional device entry-point guards and a stock Android compatibility plan. Hardware validation is pending; no release has been published.
 - Added an external research register and agent guidance for source-backed compatibility work.
+- Vulkan (fork commit `1aa23b22b`): a device that reports a Vulkan API below 1.2 is skipped with a log line instead of being driven into 1.2 commands it may not have (the suspected cause of the Adreno 730 SIGSEGV); the CPU is used. Host-tested on lavapipe with a shim that lowers the reported version; not yet tested on an Adreno device.
+- A device probe that dies now says how and where: the signal's name and the step it was on (listing devices, reading the model, first buffers, memory rate, transfer costs).
 
 ## [0.50.1] - 2026-11-25
 
