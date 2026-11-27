@@ -22,6 +22,21 @@ Maintained reference register for downstream stock Android compatibility. See [c
 | [XNNPACK](https://github.com/google/XNNPACK), [KleidiAI](https://github.com/ARM-software/kleidiai) | ARM CPU optimization references; not measured in this fork. | Check existing ggml integration first, benchmark relevant quantized operators and thread counts; avoid parallel runtimes without evidence of benefit. |
 | [MNN](https://github.com/alibaba/MNN) | Mobile inference framework with multiple GPU backends, separate model ecosystem. | Compare operator placement, memory management and CPU/GPU transfer costs; do not assume format compatibility. |
 
+## Findings, 2026-11-27 (read, not reproduced on the S22)
+
+| Source | What it says | For this fork |
+| --- | --- | --- |
+| [Box #109](https://github.com/jegly/Box/issues/109) | Adreno 730, driver 0615.95, "Vulkan API 1.3 (0x00403000)", Android 15; SIGSEGV pc 0 in `ggml_vk_create_buffer+4176` during `load_tensors`. The maintainer attributes it to `vkGetBufferDeviceAddress` from disassembly. | Whether 1.3 is the loader or the device is not stated: the Vulkan report answers it on the S22. |
+| [Box #121](https://github.com/jegly/Box/issues/121) | Same device; a NULL guard on the buffer-address command did not change the crash, which lands at the same offset. | Consistent with the KHR-alias mechanism reproduced here (`ba5f8943f`), but not proof of it. |
+| [llama.cpp #28593](https://github.com/ggml-org/llama.cpp/pull/28593) | Mali-G78, a device below 1.2: enables `VK_KHR_buffer_device_address` / `VK_KHR_timeline_semaphore` and re-inits the dispatcher on the device. Closed unmerged (minimum is 1.2); a later report (#30920) still crashed in QueueSubmit. | Not taken whole. The device-dispatch part is taken for one device only, for the three timeline commands. |
+| [PocketPal #960](https://github.com/a-ghorbani/pocketpal-ai/issues/960) | SM8450: `remote_handle_open_domain: dynamic loading failed for ... libggml-htp-v73.so` (v69 DSP), then SIGABRT. | Explains the HTP0 SIGABRT; contained by the isolated probe. |
+| [libadrenotools](https://github.com/bylaws/libadrenotools) | "Rootless Adreno GPU driver modifications/replacements", loading custom drivers such as Turnip; Android 9+, arm64; BSD-2-Clause; "not for end users": each app integrates it. | The rootless route to Turnip, app-local. Mechanism and limits are to be read from its source before any use. |
+| [Mesa Freedreno](https://docs.mesa3d.org/drivers/freedreno.html) | "Turnip is a Vulkan 1.3 driver for Adreno 6xx GPUs"; the page does not state a7xx/730 status (that is in `src/freedreno/common/freedreno_devices.py`). | Adreno 730 support must be checked in Mesa's device table, at a pinned Mesa version. |
+| llama.cpp issues on Turnip | #29786: Adreno 830 on Turnip ran llama-bench (`-ngl 1`); Q4_K_M failed at `-ngl >= 2` (pipeline error, #28635). #25906: Adreno 702 on Turnip gave wrong MUL_MAT for small n. No Adreno 730 report found. | Turnip on a7xx is not yet correct for every quantization. The planner's result check (identity) is what would catch this, so it stays on. |
+| [snapdragon-npu-llm](https://github.com/avisre/snapdragon-npu-llm) | ExecuTorch + QNN, `libQnnHtpV69Skel.so` over FastRPC; Qwen3-0.6B (third-party SM8450 export); one device (OnePlus 10 Pro); 31.3 tok/s decode, self-reported; scripts MIT. | A separate runtime and model format: not GGUF, not MoE streaming. Useful as a v69 feasibility check only. |
+| [ExecuTorch Qualcomm](https://docs.pytorch.org/executorch/stable/backends-qualcomm.html) | "verified with SM8550 and SM8450"; QNN 2.37.0 recommended; deploy pushes `libQnnHtpV69Stub.so` and `hexagon-v69/unsigned/libQnnHtpV69Skel.so`. | Same: separate runtime; the QNN SDK is not redistributable. |
+| [TriDefender kernels](https://github.com/TriDefender/llama.cpp-snapdragon_kernels) | Not read: HTTP 504 twice. | Unknown. Its claimed v69 skel stays unverified, and the protocol bars importing unverified binaries. |
+
 ## P0/P2 — memory and storage streaming
 
 | Source | Evidence / limitations | Reuse candidate and validation |

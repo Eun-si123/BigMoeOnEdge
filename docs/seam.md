@@ -421,4 +421,6 @@ or streaming layout changes. See [compatibility plan](s22-compatibility.md) for 
 the required Android / real-device gates. This is not a validated device fix or a release.
 A second fork commit on top of it (`1aa23b22b`, branch `s22/vk-device-api-gate`) skips a Vulkan
 device that reports a device API below 1.2, on every path that picks a device, instead of calling
-1.2 commands that may not exist. Again backend-only: no engine API changes.
+1.2 commands that may not exist. A third (`ba5f8943f`) takes the timeline-semaphore commands from the
+device when it is the only Vulkan device, and drops the second commit's unconditional KHR fallback
+(`docs/s22-compatibility.md`). Again backend-only: no engine API changes.

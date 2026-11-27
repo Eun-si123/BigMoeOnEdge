@@ -1427,6 +1427,21 @@ name another model, the layer is left out of the config and `plan` is `null`, wi
 Returning to the plan's model brings the layer back. A load whose plan fails drops the layer, so no
 earlier plan opens in its place.
 
+### `GET /api/diagnostics/vulkan`
+
+What the Vulkan stack says about itself, for a GPU bug report: `{"text": "...", "complete": true}`.
+The server runs itself again as a child (`bmoe-server --vulkan-report`, up to 30 s) that loads no
+backend and asks the driver directly: the loader's version; each physical device's own API and driver
+version, features and device extensions; every 1.2-core command ggml's Vulkan backend calls (buffer
+device address, timeline semaphores) and its KHR alias, resolved through `vkGetInstanceProcAddr` (how
+ggml's dispatcher resolves them) and through `vkGetDeviceProcAddr`, on a device created the way ggml
+creates it and again with the KHR extensions enabled; then the calls themselves, made only through a
+pointer that resolved. A line `step: ...` precedes each call that could end the process. When the
+child ends early, `complete` is false and the text stops at the step that did it, followed by
+`vulkan.report-process: it ended with signal 11, SIGSEGV`. Only values the Vulkan API returns are
+printed. `bmoe-cli --vulkan-report` prints the same text in its own process. The Plan screens (web and
+Android) copy it with "Copy Vulkan report".
+
 ## Backend packs and updates
 
 The desktop app's side of the release ([desktop-app.md](desktop-app.md)): the signed feed, read

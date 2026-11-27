@@ -224,6 +224,15 @@ const char * signal_name(int sig);
 DeviceProbeRunner self_process_runner(std::function<std::vector<std::string>(const std::string & device)> argv_for,
                                       double timeout_seconds);
 
+// The same isolation for a front-end's own diagnostic child: this executable again with `args`, its
+// output in `out`, and how it ended in `why` (empty when it exited 0; otherwise the signal, exit code
+// or time-out, worded as for a probe). False where no second process could be started at all - on
+// a platform without one, `why` says so and nothing was run.
+bool run_self_child(const std::vector<std::string> & args,
+                    double timeout_seconds,
+                    std::string & out,
+                    std::string & why);
+
 // How much memory this process can hold and expect to keep, which is not what the machine reports
 // as available: where a reclaim compresses, that figure is a floor for what could be taken and an
 // over-promise for what could be kept. Fills hw.holdable_bytes, or leaves it 0 where this machine

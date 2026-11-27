@@ -18,6 +18,7 @@ import type {
   Plan,
   PlanProgress,
   TokenEvent,
+  VulkanReport,
 } from './types';
 
 type Obj = Record<string, unknown>;
@@ -79,6 +80,10 @@ function hasCheck(v: Record<string, unknown>): boolean {
     isStr(v.verdict.disk) &&
     isStr(v.verdict.memory)
   );
+}
+
+export function isVulkanReport(v: unknown): v is VulkanReport {
+  return isObject(v) && isStr(v.text) && isBool(v.complete);
 }
 
 export function isCatalogCheck(v: unknown): v is CatalogCheck {

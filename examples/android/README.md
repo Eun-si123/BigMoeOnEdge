@@ -197,7 +197,9 @@ figures are there when you look. Apply and Measure again sit under them (an erro
 its own Measure again); Apply lists the settings it changed, each a link to its row in Settings. Then where the
 memory goes, what each compute device does and why, and the decisions grouped, each with the fact
 behind it and a link to its setting. Copy diagnostic puts the command and the planner's whole
-account on the clipboard for a bug report. The screen shows which stage of the measurement is
+account on the clipboard for a bug report; Copy Vulkan report, below it whatever the plan says, puts
+what the graphics driver reports about itself there ([server-api.md](../../docs/server-api.md),
+`GET /api/diagnostics/vulkan`). The screen shows which stage of the measurement is
 running; a value you set yourself in Settings is never overridden. With nothing loaded and no plan
 measured, it shows the decisions the settings carry from the last applied plan. A model is unloaded after ten
 idle minutes to give the phone its memory back; the next message reloads it.

@@ -57,6 +57,8 @@ measurements on the target phone.
 - `frontend/`: what every front-end does the same way: `user_dirs` (the per-user data folder) and
   `backend_env` (the one table of what the compute backends read from their environment, set before
   any loads; `docs/backends.md`). A backend default is an entry there, measured, never an ad-hoc `setenv`.
+  `vulkan_report` asks the Vulkan loader and driver directly (versions, extensions, which commands
+  resolve), for `/api/diagnostics/vulkan` and `bmoe-cli --vulkan-report`.
 - `cli/main.cpp`: `bmoe-cli`; the ONLY place engine environment overrides are read.
 - `server/`: `bmoe-server`, the engine behind the desktop web UI (`docs/server-api.md`). A
   front-end like the CLI: HTTP, files and the platform live here, never in `core/`. Its only env

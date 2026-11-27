@@ -15,6 +15,7 @@ import {
   isModelsResponse,
   isParamSpecList,
   isPlan,
+  isVulkanReport,
 } from './guards';
 import type {
   CatalogCheck,
@@ -31,6 +32,7 @@ import type {
   ModelsResponse,
   ParamSpec,
   Plan,
+  VulkanReport,
 } from './types';
 
 /** The code a full context is reported with: the fix is a new chat, and the screen says so. */
@@ -152,6 +154,8 @@ export const api = {
   plan: (mode: 'cached' | 'measure' = 'cached') =>
     request<Plan>('GET', mode === 'measure' ? 'api/plan?measure=1' : 'api/plan?cached=1', undefined, isPlan),
   applyPlan: () => request<Config>('POST', 'api/plan/apply', undefined, isConfig),
+  /** The Vulkan report, asked in a child process: seconds, and a driver crash ends only that child. */
+  vulkanReport: () => request<VulkanReport>('GET', 'api/diagnostics/vulkan', undefined, isVulkanReport),
   /** A decision: the model picks one of `choices` from a single prefill (docs/decide.md). */
   decide: (body: { prefix: string; suffix: string; choices: string[]; reuse_prefix?: boolean }) =>
     request<DecideResult>('POST', 'api/decide', body, isDecideResult),

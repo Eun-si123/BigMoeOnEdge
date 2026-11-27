@@ -11,9 +11,18 @@ import {
   isParamSpecList,
   isPlan,
   isTokenEvent,
+  isVulkanReport,
 } from './guards';
 
 describe('guards', () => {
+  it('accepts a Vulkan report and refuses anything else', () => {
+    expect(isVulkanReport({ text: 'vulkan.report: 1\n', complete: true })).toBe(true);
+    expect(isVulkanReport({ text: '', complete: false })).toBe(true);
+    expect(isVulkanReport({ text: 'x' })).toBe(false);
+    expect(isVulkanReport({ text: 1, complete: true })).toBe(false);
+    expect(isVulkanReport(null)).toBe(false);
+  });
+
   it('accept the shapes the server documents', () => {
     expect(isInfo({ version: '1', state: 'empty', generating: false, model: null })).toBe(true);
     expect(isInfo({ version: '1', state: 'ready', generating: true, model: { path: 'p', name: 'n', streaming: true } })).toBe(true);

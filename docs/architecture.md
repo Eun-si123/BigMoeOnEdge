@@ -13,7 +13,9 @@ a single ~25-line hook on a fork branch with an explicit sunset (see below and
 frontend/       what every front-end does the same way: user_dirs (the per-user data folder,
                 and the folder each model's measurements are kept in), so what one measured is
                 the others', and backend_env (what the compute backends read from their environment,
-                one table set before any loads); linked by bmoe-cli, bmoe-server and the desktop app
+                one table set before any loads), and vulkan_report (what the Vulkan loader and each
+                device say about themselves, asked without ggml); linked by bmoe-cli, bmoe-server and
+                the desktop app
 cli/            bmoe-cli — parses flags, the only place env vars are read
 server/         bmoe-server: the application framework every UI speaks to (docs/application-framework.md),
                 and the engine behind the desktop web UI (docs/server-api.md)

@@ -27,28 +27,62 @@ See [external research and implementation references](research-references.md) fo
 | P2 | Optional app-local Turnip | No root/system driver replacement; verify loader, license, compatibility and fallback; only if system Vulkan cannot be made reliable |
 | P3 | Debug APK, regression gates, portable release | Build arm64 CPU/Vulkan/OpenCL; run existing host gates, real-device tests and independent regression checks before release |
 
-### Vulkan device API gate (second fork commit)
+### Vulkan: what is known, and the fork commits
 
-Root-cause hypothesis, backed by sources but not yet confirmed on the target phone: the backend
-requires Vulkan 1.2 only from the *instance* (the loader). A device behind it can report 1.1; the
-backend then still calls 1.2-core device commands (buffer device address, timeline semaphores),
-which can resolve to NULL. That matches the crash signature in Box #109/#121 (Adreno 730,
-`pc 0`, in `ggml_vk_create_buffer`), and llama.cpp #28593 describes the same failure class on a
-Mali GPU that reports 1.1. Box #121 also explains why a NULL guard on the buffer-address command
-alone did not hold: the device's other 1.2 commands are just as missing.
+The Adreno 730 crash (Box #109/#121: `pc 0`, in `ggml_vk_create_buffer`, on driver 0615.95) means a
+command resolved to NULL, or to a stub that jumps to an empty slot. Which command, and why, is **not
+confirmed** on this phone. Box #109 reports "Vulkan API 1.3 (0x00403000)" without saying whether that
+is the loader's version or the device's; if it is the device's, a "device below 1.2" explanation does
+not apply to that phone. The diagnostics below exist to settle it.
 
-The fork commit `1aa23b22b` (branch `s22/vk-device-api-gate`) checks the device's `apiVersion` on
-all three paths that pick a device: the default list, the "first non-CPU device" fallback (which
-previously skipped every check), and `GGML_VK_VISIBLE_DEVICES`. A device below 1.2 is skipped with
-`ggml_vulkan: skipping <name>: device reports Vulkan X.Y.Z, the backend needs 1.2`, and the CPU is
-used. This does **not** make the GPU usable on such a driver: it turns a crash into a clear
-refusal. Support below 1.2 (the #28593 approach) was declined upstream and is not attempted here.
+Fork branch `s22/vk-device-api-gate` on `Eun-si123/llama.cpp`, on top of `f7adfde`:
 
-Tested on the host only: lavapipe through an `LD_PRELOAD` shim that reports the device as a 1.1
-integrated GPU. A 1.1 device is skipped on all three paths; a 1.2+ device is still used, and the
-tiny MoE gives the same output as on the CPU. **Not tested on an Adreno 730.** If the S22 driver
-reports 1.2 or higher, this gate does not apply and the crash has another cause (see the
-diagnostics below).
+- `1aa23b22b`: a device whose own `apiVersion` is below 1.2 is skipped, with a log line, on every path
+  that picks a device (the default list, the "first non-CPU device" fallback that skipped every check,
+  and `GGML_VK_VISIBLE_DEVICES`). Applies only if the driver reports 1.1.
+- `ba5f8943f`: **a mechanism reproduced here that defeats NULL checks.** ggml's global dispatcher takes
+  `vkWaitSemaphores`, `vkSignalSemaphore` and `vkGetSemaphoreCounterValue` from
+  `vkGetInstanceProcAddr`. Where the core name answers NULL, Vulkan-Hpp falls back to the KHR alias,
+  which the loader does answer; the device never enabled `VK_KHR_timeline_semaphore`, so that
+  trampoline jumps to an empty slot. The result is SIGSEGV at pc 0 in
+  `ggml_backend_vk_device_event_synchronize`, which a check on the dispatcher cannot see, and
+  `f7adfde`'s guards do not cover. It is the same failure class as Box #121 (a guard added, the same
+  crash), which does not prove it is the same command. With one Vulkan device the commit takes these
+  three commands from `vkGetDeviceProcAddr`: **the GPU keeps running.** If the device has none of them,
+  it stops with the command named instead of crashing. With several devices the global dispatcher is
+  left alone, because one device's pointer is not valid for another.
+- The same commit removes `1aa23b22b`'s `vkGetBufferDeviceAddressKHR` fallback. The report below shows a
+  conformant driver (Mesa) answering NULL for the KHR name until the extension is enabled, and ggml
+  never enables it. So the fallback can only ever succeed on a non-conformant driver, by handing out a
+  command that is not valid to call.
+
+Mock tests on the host: lavapipe shown as an integrated GPU, through an `LD_PRELOAD` interposer
+(`SHIM_NULL`, `SHIM_NULL_INSTANCE_ONLY`, `SHIM_API11`) used during development; the shim is not
+committed.
+
+| Case | Before (`f7adfde`) | After (`ba5f8943f`) |
+| --- | --- | --- |
+| no NULL | runs on the GPU | runs on the GPU, same output as the CPU |
+| `vkGetBufferDeviceAddress` NULL (instance and device) | BDA off, runs | same |
+| `vkGetMemoryHostPointerPropertiesEXT` NULL | staging, runs | same |
+| `vkWaitSemaphores` NULL on the instance only | **SIGSEGV pc 0** | log line, **runs on the GPU** |
+| a timeline command NULL on instance and device | **SIGSEGV pc 0** (vkWaitSemaphores) | abort naming the command |
+| device reports 1.1 | used | skipped, CPU |
+
+`test-backend-ops -o MUL_MAT_ID` on lavapipe: 1194/1194 with no NULL. The run with all three timeline
+commands NULL on the instance is noted in the PR. **Nothing here has run on an Adreno 730.**
+
+Not covered: `resetQueryPool` (1.2 core) is reached only with the perf logger on (`GGML_VK_PERF_LOGGER`).
+
+### Vulkan report (`/api/diagnostics/vulkan`, "Copy Vulkan report")
+
+The question the fixes above cannot answer without the phone is which command the S22 driver leaves
+NULL, and on which path. The report asks the driver directly, in a child process, without ggml. It
+lists the loader and device versions; features; extensions; every command above, core and KHR, through
+the instance and through the device, on a device created as ggml creates it and again with the KHR
+extensions enabled; and then the buffer-address and timeline calls themselves. See
+[server-api.md](server-api.md). On the phone: Plan screen, "Copy Vulkan report", paste the text into
+the issue.
 
 ### Probe diagnostics
 
@@ -60,20 +94,35 @@ child's other output (driver logs, paths) does not.
 
 ### What to record on the phone
 
-1. Plan screen, "Device backends": each device's status and reason (now with signal and step).
-2. Whether `Vulkan0` (Adreno 730) still appears. If it is gone, the driver reports below 1.2;
-   `adb logcat | grep ggml_vulkan` shows the reported version.
+1. Plan screen, "Copy Vulkan report": the whole text. It settles the device version and the NULL commands.
+2. Plan screen, "Device backends": each device's status and reason (now with signal and step). Whether
+   `Vulkan0` (Adreno 730) is used, refused on results or speed, or unusable, and why.
 3. For the 35B Q5_K_M first-load failure: the error text shown, and whether the engine process was
    killed (`adb logcat | grep -i "lowmemorykiller\|lmkd"`) or ended with a signal. Not investigated
    yet: no log of it exists.
 
-### Hexagon v69 (not changed)
+### What a working GPU can be expected to give
+
+Getting the Adreno past its crash makes it *eligible*; the planner still decides whether to use it, on
+the same measurements as on every machine (`docs/backends.md`). On the phones measured so far, a GPU
+that shares the cores' memory did not decode faster: decode reads every active weight once per token,
+and the GPU reads the same LPDDR at a similar rate. Prefill is where it could help. So "the GPU runs"
+and "the GPU is used" are separate results, and the plan reports both. The planner is not loosened to
+choose a device that measured slower or did not reproduce the CPU's answer.
+
+### Hexagon v69 (research; no code)
 
 The release APK carries Hexagon skels for v73-v81 only. PocketPal #960 records the same SIGABRT on an
 SM8450: fastrpc fails to load the v73 skel on the v69 DSP, and the abort follows. Here the probe runs
-in its own process, so the abort costs only time and the device is marked unusable. A v69 skel would
-need the Hexagon SDK and upstream backend support for v69; it is not attempted.
+in its own process, so the abort costs only time, and the device is marked unusable. llama.cpp's
+Snapdragon backend documents v73 and newer only (`docs/backend/snapdragon/README.md`, read 2026-11-27).
+For the v69 paths, see [research-references.md](research-references.md). None of them is a GGUF/ggml
+backend, and none is a drop-in for this engine's streamed MoE. Each needs Qualcomm's QNN/QAIRT SDK,
+which is account-walled and not redistributable, so a build here cannot include it.
 
-First implementation: a separate llama.cpp fork commit resolves BDA and host-pointer-import commands per logical device and disables those optional paths if absent. It deliberately does not change the minimum Vulkan version or the global dispatcher. It is unverified on hardware. The parent repository pins that commit; upstream expert-ready and Hexagon hooks are preserved. No release or speed claim follows from this change alone.
+### Fork commits pinned
 
-Baseline comparisons: use the same model, quantization, prompt, context, token budget and sampling seed; record backend selection, prefill/decode rates separately, peak memory, cache hit rate and I/O wait. Run small-model smoke tests before large streamed models; compare streamed vs resident where memory permits. Keep experimental changes separate and retain a CPU-only escape path.
+`f7adfde`, `1aa23b22b` and `ba5f8943f` on `Eun-si123/llama.cpp` `s22/vk-device-api-gate`, on top of
+the two upstream hooks (`docs/seam.md`). With one Vulkan device the global dispatcher's three timeline
+commands are replaced by the device's own; with several it is left alone. Unverified on hardware. No
+release or speed claim follows from these changes alone.

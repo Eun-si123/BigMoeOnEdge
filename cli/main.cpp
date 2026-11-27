@@ -21,6 +21,7 @@
 #include "bmoe/decode_trace.h"
 #include "bmoe/version.h"
 #include "backend_env.h"
+#include "vulkan_report.h"
 #include "user_dirs.h"
 
 #include <atomic>
@@ -639,6 +640,9 @@ static void print_usage(const char * argv0) {
                 "                          The child exists so a driver that crashes or hangs costs the\n"
                 "                          device, not the run\n"
                 "      --probe-device D    internal: probe device D, print its facts, exit (the child above)\n"
+                "      --vulkan-report     print what the Vulkan loader and each device report (versions,\n"
+                "                          extensions, which 1.2/KHR commands resolve, a buffer address and\n"
+                "                          a timeline semaphore), then exit. Loads no backend\n"
                 "      --probe-mem         measure how much memory this machine will let us KEEP, by holding\n"
                 "                          it until the kernel takes some back. The one probe that puts a live\n"
                 "                          machine under real pressure, so it is off unless asked\n"
@@ -762,6 +766,7 @@ int main(int argc, char ** argv) {
     bool progress = false; // the line protocol (docs/telemetry.md) instead of inline text
 
     bool describe_params = false;
+    bool vulkan_report = false;
     bool show_config = false;
     bool auto_plan = false;
     bool plan_explain = false;
@@ -801,6 +806,8 @@ int main(int argc, char ** argv) {
             seen.insert("progress");
         } else if (a == "--describe-params")
             describe_params = true;
+        else if (a == "--vulkan-report")
+            vulkan_report = true;
         else if (a == "--show-config")
             show_config = true;
         // Three commands over one machinery, because they answer three different questions: look at
@@ -906,6 +913,13 @@ int main(int argc, char ** argv) {
     if (describe_params) {
         std::printf("%s\n", params_json(RunConfig{}).c_str());
         return 0;
+    }
+    if (vulkan_report) {
+        const bool ok = bmoe::frontend::vulkan_report([](const std::string & line) {
+            std::printf("%s\n", line.c_str());
+            std::fflush(stdout); // a driver that ends the process still leaves every line before it
+        });
+        return ok ? 0 : 1;
     }
 
     // Env overrides (flag wins: only apply when the parameter was not typed). Asking whether it was

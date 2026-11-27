@@ -92,6 +92,27 @@
     }
     setTimeout(() => (diag = diag === 'ok' ? 'idle' : diag), 2000);
   }
+  // The Vulkan report: asked on demand (it creates devices on the GPU), copied as the server wrote it.
+  let vk = $state<'idle' | 'running' | 'ok' | 'failed'>('idle');
+  let vkText = $state('');
+  let vkPartial = $state(false);
+  async function copyVulkanReport() {
+    vk = 'running';
+    try {
+      const r = await api.vulkanReport();
+      vkText = r.text;
+      vkPartial = !r.complete;
+    } catch (e) {
+      vkText = String(e);
+      vkPartial = true;
+    }
+    try {
+      await navigator.clipboard.writeText(vkText);
+      vk = 'ok';
+    } catch {
+      vk = 'failed';
+    }
+  }
   // A lane names devices by their engine id (MTL0, CUDA0); the plan's device list knows what the
   // system calls them, which is what a person reads.
   const deviceName = (id: string) => {
@@ -287,6 +308,21 @@
       </div>
     {/if}
   {/if}
+{/if}
+
+<div class="apply diag">
+  <button type="button" onclick={copyVulkanReport} disabled={vk === 'running'}>{t('plan.vulkan')}</button>
+  <span class="muted">{vk === 'running' ? t('plan.vulkan.running') : t('plan.vulkan.help')}</span>
+  {#if vk === 'ok'}<span class="ok-text" role="status">{t('plan.diagnostic.copied')}</span>{/if}
+</div>
+{#if vkPartial && vk !== 'running'}
+  <div class="banner warn"><span>{t('plan.vulkan.partial')}</span></div>
+{/if}
+{#if vk === 'failed'}
+  <div class="banner warn">
+    <span>{t('plan.clipboard')}</span>
+    <pre class="cmd">{vkText}</pre>
+  </div>
 {/if}
 
 {#if showCarried}

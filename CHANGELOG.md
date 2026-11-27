@@ -10,6 +10,8 @@ Semantic Versioning.
 - Downstream experimental Vulkan optional device entry-point guards and a stock Android compatibility plan. Hardware validation is pending; no release has been published.
 - Added an external research register and agent guidance for source-backed compatibility work.
 - Vulkan (fork commit `1aa23b22b`): a device that reports a Vulkan API below 1.2 is skipped with a log line instead of being driven into 1.2 commands it may not have (the suspected cause of the Adreno 730 SIGSEGV); the CPU is used. Host-tested on lavapipe with a shim that lowers the reported version; not yet tested on an Adreno device.
+- Vulkan (fork commit `ba5f8943f`): with one Vulkan device, the timeline-semaphore commands come from the device rather than the instance. Where the instance answered NULL, ggml's dispatcher fell back to a KHR alias the device never enabled: SIGSEGV at pc 0 that a NULL check cannot see, reproduced on the host with an interposer. The GPU now keeps running in that case, and a device with none of the commands stops with the command named. The unsafe `vkGetBufferDeviceAddressKHR` fallback from `1aa23b22b` is removed.
+- Vulkan report: `GET /api/diagnostics/vulkan`, `bmoe-cli --vulkan-report`, and "Copy Vulkan report" on the Plan screens (web and Android). It lists the loader and device versions, features and extensions, which 1.2/KHR commands resolve through the instance and the device, and the buffer-address and timeline calls themselves, in a child process that names the step it died on.
 - A device probe that dies now says how and where: the signal's name and the step it was on (listing devices, reading the model, first buffers, memory rate, transfer costs).
 
 ## [0.50.1] - 2026-11-25

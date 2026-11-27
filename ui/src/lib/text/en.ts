@@ -847,6 +847,10 @@ export const en = {
   'plan.diagnostic.copied': 'Copied.',
   'plan.howItDecides': 'How the planner decides',
   'plan.clipboard': 'The clipboard is not available here. Copy it by hand:',
+  'plan.vulkan': 'Copy Vulkan report',
+  'plan.vulkan.help': 'What the graphics driver says it supports, asked in a separate process, for a GPU bug report.',
+  'plan.vulkan.running': 'Asking the driver…',
+  'plan.vulkan.partial': 'The process that asked the driver ended early: the report stops at the step that ended it.',
   'plan.carried': 'Decisions from the last applied plan',
   'plan.carried.help': 'What the settings carry now; Measure shows the plan in full.',
 } as const;

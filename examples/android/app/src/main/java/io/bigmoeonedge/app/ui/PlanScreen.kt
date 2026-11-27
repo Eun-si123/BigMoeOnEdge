@@ -172,6 +172,29 @@ fun PlanScreen(modifier: Modifier = Modifier, onOpenSetting: (key: String) -> Un
                 Hint("What the settings carry now; Measure shows the plan in full.")
                 Decisions(carried, onOpenSetting)
             }
+            // What the graphics driver says it supports, for a GPU bug report: asked on a tap (it creates
+            // devices on the GPU), in a process of the server's own, whatever the plan above says.
+            val clipboard = LocalClipboardManager.current
+            var askingVulkan by remember { mutableStateOf(false) }
+            OutlinedButton(
+                shape = Corner,
+                enabled = engine.serverUp && !askingVulkan,
+                onClick = {
+                    askingVulkan = true
+                    scope.launch {
+                        Engine.vulkanReport()
+                            .onSuccess { (text, complete) ->
+                                clipboard.setText(AnnotatedString(text))
+                                snackbar.showSnackbar(
+                                    if (complete) "Copied: the Vulkan report"
+                                    else "Copied. The process that asked the driver ended early: the report stops at that step",
+                                )
+                            }
+                            .onFailure { snackbar.showSnackbar(it.message ?: "could not ask the driver") }
+                        askingVulkan = false
+                    }
+                },
+            ) { Text(if (askingVulkan) "Asking the driver..." else "Copy Vulkan report") }
             Spacer(Modifier.height(24.dp))
         }
     }

@@ -46,6 +46,7 @@
 #include "bmoe/measured_knobs.h"
 #include "bmoe/model_records.h"
 #include "backend_env.h"
+#include "vulkan_report.h"
 #include "user_dirs.h"
 #include "bmoe/params.h"
 #include "bmoe/probe.h"
@@ -78,6 +79,9 @@ namespace {
 
 constexpr const char * kDefaultHfEndpoint = "https://huggingface.co";
 constexpr int kHfSearchLimit = 20; // repositories a search answers with: a screen's worth
+// The Vulkan report creates two devices and makes four calls on each: seconds on a phone, so a
+// driver that hangs is the only way past this.
+constexpr double kVulkanReportSeconds = 30.0;
 
 // The server's workers. A request holds one for its whole life: an event stream for as long as a UI
 // is open, a chat turn while it runs and while it waits its place in line. Those are bounded
@@ -176,6 +180,7 @@ struct Options {
     std::string feed_url = kFeedUrl;              // the release feed, read only when a person asks
     long parent_pid = 0;                          // --parent-pid: stop when that process is gone
     std::string probe_device;                     // internal: this process IS such a child; probe this device and exit
+    bool vulkan_report = false;                   // internal: this process is the Vulkan report's child
     std::map<std::string, std::string> launch;    // engine parameters given on the command line
 };
 
@@ -327,6 +332,8 @@ int parse_args(int argc, char ** argv, Options & o) {
             o.isolated_probes = false;
         else if (a == "--probe-device")
             o.probe_device = next();
+        else if (a == "--vulkan-report")
+            o.vulkan_report = true;
         else if (a == "--hf-endpoint") {
             o.hf_endpoint = next();
             while (!o.hf_endpoint.empty() && o.hf_endpoint.back() == '/')
@@ -1842,6 +1849,25 @@ void register_routes(httplib::Server & svr, App & app) {
     const auto reply = [](httplib::Response & res, const UpdateService::Reply & r) {
         send_json(res, r.body, r.status);
     };
+    // What the Vulkan stack says about itself (frontend/vulkan_report.h), asked in a child process: a
+    // driver that crashes on one of the questions ends that process, and the lines before it are the
+    // answer. The text is the Plan screen's to copy into a report.
+    svr.Get("/api/diagnostics/vulkan", [&](const httplib::Request &, httplib::Response & res) {
+        std::string out, why;
+        run_self_child({"--vulkan-report"}, kVulkanReportSeconds, out, why);
+        const std::string marker = std::string(frontend::vulkan_report_marker) + " ";
+        std::string text;
+        size_t at = 0;
+        while (at < out.size()) {
+            size_t end = out.find('\n', at);
+            if (end == std::string::npos) end = out.size();
+            const std::string line = out.substr(at, end - at);
+            if (line.compare(0, marker.size(), marker) == 0) text += line.substr(marker.size()) + "\n";
+            at = end + 1;
+        }
+        if (!why.empty()) text += "vulkan.report-process: " + why + "\n";
+        send_json(res, json{{"text", text}, {"complete", why.empty()}});
+    });
     svr.Get("/api/backends", [&, reply](const httplib::Request & req, httplib::Response & res) {
         reply(res, app.updates->backends(req.get_param_value("refresh") == "1"));
     });
@@ -1937,6 +1963,16 @@ int run(int argc, char ** argv, const Embedding & embedding) {
     Options o;
     const int rc = parse_args(argc, argv, o);
     if (rc >= 0) return rc;
+    // The Vulkan report's child (/api/diagnostics/vulkan): before any backend loads or any socket is
+    // bound, so what it asks the driver is all this process does. Each line carries the marker, so the
+    // parent keeps exactly these lines out of whatever else the driver writes to the same stream.
+    if (o.vulkan_report) {
+        const bool ok = frontend::vulkan_report([](const std::string & line) {
+            std::printf("%s %s\n", frontend::vulkan_report_marker, line.c_str());
+            std::fflush(stdout);
+        });
+        return ok ? 0 : 1;
+    }
     if (!o.log_file.empty()) {
         // From here on everything the console would have shown goes to the file, this start's own
         // lines included; what came before (an argument refused) was for whoever typed it.

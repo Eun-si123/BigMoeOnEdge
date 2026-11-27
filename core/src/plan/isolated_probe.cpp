@@ -252,4 +252,30 @@ DeviceProbeRunner self_process_runner(std::function<std::vector<std::string>(con
     };
 }
 
+bool run_self_child(const std::vector<std::string> & args,
+                    double timeout_seconds,
+                    std::string & out,
+                    std::string & why) {
+    why.clear();
+    if (!pio::can_run_self()) {
+        why = "this platform cannot start a second process, so it was not run";
+        return false;
+    }
+    const pio::ChildResult r = pio::run_self(args, timeout_seconds, &out);
+    if (r.outcome == pio::ChildOutcome::TimedOut) {
+        char b[96];
+        std::snprintf(b, sizeof(b), "it did not finish in %.0f s and was stopped", timeout_seconds);
+        why = b;
+    } else if (r.outcome == pio::ChildOutcome::Signalled) {
+        const char * name = signal_name(r.code);
+        why = "it ended with signal " + std::to_string(r.code) + (*name ? std::string(", ") + name : std::string());
+    } else if (r.outcome != pio::ChildOutcome::Exited) {
+        why = "a second process could not be started";
+        return false;
+    } else if (r.code != 0) {
+        why = "it exited with " + std::to_string(r.code);
+    }
+    return true;
+}
+
 } // namespace bmoe

@@ -93,6 +93,8 @@ class Api(private val baseUrl: String, private val apiKey: String) : Conversatio
     fun addUrl(url: String): JSONObject = send("POST", "/api/models/url", JSONObject().put("url", url), SLOW_MS)
     fun plan(measure: Boolean): JSONObject = getJson(if (measure) "/api/plan?measure=1" else "/api/plan?cached=1", SLOW_MS)
     fun applyPlan(): JSONObject = send("POST", "/api/plan/apply", null, QUICK_MS)
+    /** What the Vulkan stack says about itself, asked by the server in a child process (seconds). */
+    fun vulkanReport(): JSONObject = getJson("/api/diagnostics/vulkan", SLOW_MS)
 
     /** Reads the release feed, the one network request the app makes only when a person asks. */
     fun update(): JSONObject = getJson("/api/update", SLOW_MS)
