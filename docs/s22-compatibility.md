@@ -219,6 +219,35 @@ Plan screen; and the rates. A matmul one token wide does a mat-vec's job at a co
 measure the GPU slower than the cores at decode and keep it to the prompt, or to nothing. The
 accuracy checks are unchanged.
 
+### The matmul fallback was refused too (fork commits `525db2870`, `2246879d7`)
+
+The next run (APK with `437dde482`) got past the mat-vecs and stopped on the matmul they fell back to:
+`compute pipeline creation failed for matmul_quant_f32_f16acc_0`. The quantized matmuls on this path
+share one shader family (`matmul_quant_*`), which the check's prefix list (`matmul_q4_k`, ...) did not
+name, so "every matmul compiles" in the section below was wrong: those were not the matmuls a run uses.
+
+- **Stable path:** where refusals are looked for, `supports_op` works out which path a `MUL_MAT` /
+  `MUL_MAT_ID` would take, using the dispatch's own conditions. For a matmul it creates every
+  registered tile and alignment of that type once (`ggml_vk_matmul_usable`, cached), and a refusal
+  leaves the op to the CPU. With the phone's refusals plus `matmul_quant`/`matmul_id_quant` injected:
+  a Q4_K/Q6_K MoE runs, and `test-backend-ops` MUL_MAT 436/436 and MUL_MAT_ID 126/126 pass with no
+  abort. What remains on the GPU then is what the driver creates (norms, rope, attention, q4_0
+  mat-vecs, ...); the planner measures whether that is worth it.
+- **No more prefix list:** the report's pipeline check now creates every pipeline the backend
+  registers (empty prefix = all; 2075 pipelines in 211 s on a software rasterizer), with up to 600 s. If it runs out, the refusals found so far are kept.
+
+**Next, beyond the fallback** (not done yet; each reads the full check's output):
+1. Refused against created, by instruction: the SPIR-V of each pair through `scripts/spirv-audit.py`
+   (capabilities, extensions), and a diff of the opcodes they use (int8/16 unpack, shared-memory
+   tables, spec-constant-sized arrays...).
+2. The same shader at SPIR-V 1.3, 1.4 and 1.5, and with its specialization constants folded in
+   (`spirv-opt --set-spec-const-default-value` + `--freeze-spec-const`) against the shipped form:
+   the report can create these variants on the phone the way it creates its four test modules.
+3. Mesa Turnip without root (libadrenotools loads it app-locally): Adreno 730 support at a pinned Mesa
+   version, licence, and whether its compiler takes these shaders.
+4. OpenCL, which the plan already arms for the prompt (1.6x the cores, same results): its kernel
+   choices for Q4_K/Q6_K and its decode rate.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):

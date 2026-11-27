@@ -83,16 +83,12 @@ constexpr int kHfSearchLimit = 20; // repositories a search answers with: a scre
 // The Vulkan report creates two devices and makes four calls on each: seconds on a phone, so a
 // driver that hangs is the only way past this.
 constexpr double kVulkanReportSeconds = 30.0;
-// The pipeline check creates each pipeline of the families a language model's graph uses, in the
-// quant types models ship in: 1333 of them, about two minutes on a software rasterizer. A driver
-// that hangs on one is what the limit is for.
-constexpr double kVulkanPipelineSeconds = 300.0;
-constexpr const char * kVulkanPipelinePrefixes =
-    "mul_mat_vec_q4_k,mul_mat_vec_id_q4_k,mul_mat_vec_q5_k,mul_mat_vec_id_q5_k,mul_mat_vec_q6_k,mul_mat_vec_id_q6_k,"
-    "mul_mat_vec_q8_0,mul_mat_vec_id_q8_0,mul_mat_vec_q4_0,mul_mat_vec_id_q4_0,mul_mat_vec_f16,mul_mat_vec_id_f16,"
-    "mul_mat_vec_f32,mul_mat_vec_id_f32,matmul_q4_k,matmul_id_q4_k,matmul_q5_k,matmul_id_q5_k,matmul_q6_k,"
-    "matmul_id_q6_k,matmul_q8_0,matmul_id_q8_0,matmul_f16,matmul_f32,get_rows,rms_norm,rope,soft_max,flash_attn,"
-    "topk_moe,argsort,silu,swiglu,geglu,add,mul,cpy,contig_cpy";
+// The pipeline check creates every pipeline the backend registers, one at a time: a refusal anywhere
+// in the paths a run can take is listed, not only in the families someone thought to name (the S22's
+// matmul_quant was missed that way). Thousands of pipelines; a driver that hangs, or a slow one, is
+// what the limit is for, and what was refused before it is kept.
+constexpr double kVulkanPipelineSeconds = 600.0;
+constexpr const char * kVulkanPipelinePrefixes = ""; // every pipeline
 constexpr const char * kVulkanPipelineMarker = "BMOE_VKP";
 constexpr int kNoPipelineCheck = 3; // the child's exit code where no backend offers the check
 
@@ -1915,7 +1911,7 @@ void register_routes(httplib::Server & svr, App & app) {
         } else {
             text += "pipelines.checked: " + std::to_string(checked) + " (" +
                     std::to_string(std::count(refused.begin(), refused.end(), '\n')) +
-                    " refused; families: language-model kernels in f32, f16, q4_0, q8_0, q4_K, q5_K, q6_K)\n" + refused;
+                    " refused; every pipeline the backend registers)\n" + refused;
             if (!pwhy.empty())
                 text += "pipelines.process: " + pwhy +
                         (last_started.empty() ? "" : ", while creating " + last_started) + "\n";
