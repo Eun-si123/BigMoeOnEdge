@@ -175,6 +175,50 @@ alone. With it at 32 and the Qualcomm driver id reported, the q4_K mat-vec pipel
 (workgroup 16), the q6_K ones are listed as refused, and the endpoint returns the report with the
 refused names.
 
+### What the phone's compiler refuses, and the way around it (fork commit `437dde482`)
+
+The pipeline check ran on the phone (after `69e303d`; before it the check's child had collided with the
+server's port). Of 1297 pipelines created, 565 were refused, all with `createComputePipeline:
+ErrorUnknown`. By family:
+
+| Family | Refused | Created |
+| --- | --- | --- |
+| mat-vec (`mul_mat_vec_*`, plain and by expert, f32 and f16 input, every workgroup and column variant) | q8_0, q2_K, q3_K, q4_K, q5_K, q6_K, IQ types, tq2_0, mxfp4, nvfp4 | q4_0, f16, f32 |
+| matmul (`matmul_*`, `matmul_id_*`) | none | every type checked, q4_K to q8_0 included |
+| `get_rows_*` | IQ types, tq1_0, mxfp4, nvfp4 | the others, q4_K and q6_K included |
+| `cpy_*` | q8_0 to f32, iq4_nl both ways | the others |
+| norm, rope, softmax, flash attention, top-k MoE, argsort, elementwise | none | all |
+
+So the q4_K mat-vec was refused at workgroup 16 too: #28635's threshold (Adreno 830) does not describe
+this compiler, and `d486a5759` changed nothing on it (reverted). Why it refuses is not known. The
+pattern is every mat-vec of a quantized type but q4_0's, so it is not one shader's code.
+
+**The way around it:** ggml chose the mat-vec by type alone. On Qualcomm's proprietary driver the fork
+now creates one pipeline of each family and type when the device is created. A refusal marks that
+family for that type, and every place that would need it goes another way:
+- the mat-vec choice for `MUL_MAT`, its `MUL_MAT+ADD` fusion, and the `MUL_MAT_ID` path (with its
+  `ADD_ID` fusion) take the matmul of that type, which the compiler creates;
+- `supports_op` declines a refused `get_rows` or copy, so the scheduler gives those to the CPU.
+
+Other drivers try nothing and change nothing. A refusal that the device-creation check did not foresee
+still ends the process, with the pipeline's name.
+
+**Host tests** (lavapipe, S22 shim, Qualcomm driver id, no int64, no int dot, no coopmat, no host import,
+128 MiB storage range, and the phone's refusal list injected with the fork's test hook
+`GGML_VK_REFUSE_PIPELINES`):
+- a Q4_K/Q6_K MoE (`llama-simple`, all layers on the device) runs;
+- `test-backend-ops`: MUL_MAT 773/773, MUL_MAT_ID 359/359, GET_ROWS 140/140, CPY 253/253, every refused
+  op reported as not supported (the CPU's);
+- BigMoe's isolated probe (`--probe-device Vulkan0`) completes every step, where on the phone it had
+  aborted. The real layer agrees with the exact result: experts 2.0e-5 and dense 2.4e-5 at one token
+  against a bound of 1e-3, and 1.9e-5 / 2.4e-5 at prompt width against 1e-2. Its decode-width rates
+  are low there, the matmul doing a mat-vec's work on a software rasterizer.
+
+**What the phone has to show:** that the device check passes on it; Vulkan0's status and reason on the
+Plan screen; and the rates. A matmul one token wide does a mat-vec's job at a cost, so the planner may
+measure the GPU slower than the cores at decode and keep it to the prompt, or to nothing. The
+accuracy checks are unchanged.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
@@ -279,6 +323,7 @@ which is account-walled and not redistributable, so a build here cannot include 
 
 ### Fork commits pinned
 
-`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849`, `d486a5759` and `d5dde4318` on `Eun-si123/llama.cpp`
+`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849`, `d486a5759` (reverted by `437dde482`), `d5dde4318` and
+`437dde482` on `Eun-si123/llama.cpp`
 `s22/vk-device-api-gate`, on top of the two upstream hooks (`docs/seam.md`). Unverified on an Adreno
 730. No release or speed claim follows from these changes alone.

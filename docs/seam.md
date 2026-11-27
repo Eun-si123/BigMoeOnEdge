@@ -428,4 +428,7 @@ KHR/EXT extensions instead of skipping it. A fifth (`d486a5759`) builds the q4_K
 workgroup 16 on Qualcomm's proprietary driver, whose compiler refuses them at 32 and above. A sixth
 (`d5dde4318`) names a refused pipeline in the exception's text and exports
 `ggml_backend_vk_check_pipelines` through `ggml_backend_reg_get_proc_address`, which
-`core/src/plan/pipeline_probe.cpp` calls when it is there. Again backend-only: no engine API changes.
+`core/src/plan/pipeline_probe.cpp` calls when it is there. A seventh (`437dde482`) finds, on
+Qualcomm's proprietary driver, the families of pipelines its compiler refuses and routes those ops
+around them (a mat-vec to the matmul, a get_rows or copy to the CPU), and reverts the fifth. Again
+backend-only: no engine API changes.
