@@ -290,7 +290,27 @@ confirmed only when a rewritten module is created on the phone.
    does for types without a matmul shader. `supports_op` accepts it only where the dequant shader and
    the f16 matmul were both created and the f16 copy of the weight fits one storage buffer (128 MiB on
    this phone). That excludes the experts of a large MoE (one tensor holds every expert), which stay
-   on the CPU for the prompt.
+   on the CPU for the prompt. The f16 copy is made only from a fully contiguous weight (the
+   dequant shader reads one run of blocks), so an expert tensor viewed with gaps stays on the CPU.
+3. **The K-quant dequant shaders without the 256-way unroll.** That path was rarely taken upstream
+   (every K-quant has its own matmul there) and it was wrong: from about the 64th superblock on,
+   q2_K/q4_K/q5_K/q6_K came out as zeros on lavapipe. A harness that multiplies by an identity matrix
+   reads the dequantized weight back; without `[[unroll]]` on the block loop (which has an early
+   return) every type matches the CPU exactly. Dropped on all six K-quant dequants, the loop body
+   unchanged, since the Adreno compiler could take the same turn.
+
+Host evidence (lavapipe behind `tests/vulkan_s22_shim.c`, no cooperative matrix, no integer dot, as
+on the phone), types q2_K..q6_K, q8_0, q4_0, f16:
+
+| Run | MUL_MAT | MUL_MAT_ID |
+| --- | --- | --- |
+| rewritten shaders, nothing refused | 967/967 | 505/505 |
+| quantized matmuls refused (dequant path) | 967/967 | 504/505 before the contiguity check (the failure: experts viewed with gaps); rerun pending |
+
+CPY 259/259 and GET_ROWS 236/236 with the rewritten q8_0 functions. Without the shim, some f16/f32
+cases fail on lavapipe's cooperative-matrix path, before these changes as after: not a path the phone
+has. **Not yet run on the phone**: whether its compiler now creates the rewritten mat-vecs is what
+the next "Copy Vulkan report" shows.
 
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
