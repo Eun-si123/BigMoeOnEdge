@@ -2817,7 +2817,15 @@ int main() {
         check(probe_last_words("GGML_ASSERT ok?\nsome driver line /vendor/lib64/x.so\n").empty() &&
                   probe_last_words("").empty() && probe_last_words("no such thing:12: here").empty(),
               "isolated: nothing else is taken for last words");
-        check(probe_last_words(std::string("/a/b.cpp:1: ") + std::string(400, 'x')).size() <= 243,
+        const std::string refused = probe_last_words(
+            "ggml_vulkan: compute pipeline creation failed for mul_mat_vec_q4_k_f32_f32: "
+            "vk::Device::createComputePipeline: ErrorUnknown\n#0 0x1 in x\nlibc++abi: terminating due "
+            "to uncaught exception of type vk::UnknownError: vk::Device::createComputePipeline: ErrorUnknown\n");
+        check(refused == "ggml_vulkan: compute pipeline creation failed for mul_mat_vec_q4_k_f32_f32: "
+                         "vk::Device::createComputePipeline: ErrorUnknown | libc++abi: terminating due to uncaught "
+                         "exception of type vk::UnknownError: vk::Device::createComputePipeline: ErrorUnknown",
+              "isolated: the pipeline ggml-vulkan could not create leads the last words", refused);
+        check(probe_last_words(std::string("/a/b.cpp:1: ") + std::string(600, 'x')).size() <= 363,
               "isolated: last words are bounded");
         check(std::string(signal_name(11)) == "SIGSEGV" && std::string(signal_name(6)) == "SIGABRT" &&
                   std::string(signal_name(1000)).empty(),

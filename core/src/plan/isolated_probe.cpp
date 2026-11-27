@@ -105,7 +105,7 @@ std::string sanitized(const std::string & l) {
             if ((unsigned char) c < 0x20 || (unsigned char) c > 0x7e) c = '?';
         out += (out.empty() ? "" : " ") + w;
     }
-    constexpr size_t k_max = 240;
+    constexpr size_t k_max = 360;
     if (out.size() > k_max) out = out.substr(0, k_max) + "...";
     return out;
 }
@@ -120,6 +120,11 @@ std::string probe_last_words(const std::string & out) {
         if (!l.empty() && l.back() == '\r') l.pop_back();
         lines.push_back(l);
     }
+    // ggml-vulkan names the pipeline, module or layout it could not create on the line before its
+    // exception ends the process: kept, so the reason says which shader the driver refused.
+    std::string named;
+    for (const std::string & s : lines)
+        if (s.rfind("ggml_vulkan: ", 0) == 0 && s.find(" creation failed for ") != std::string::npos) named = s;
     std::string said;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string & s = lines[i];
@@ -130,6 +135,7 @@ std::string probe_last_words(const std::string & out) {
                  lines[i - 1].find("terminate called") != std::string::npos)
             said = lines[i - 1] + " " + s;
     }
+    if (!named.empty()) said = said.empty() ? named : named + " | " + said;
     return said.empty() ? "" : sanitized(said);
 }
 

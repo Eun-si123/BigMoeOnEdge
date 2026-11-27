@@ -218,7 +218,8 @@ std::string last_probe_stage(const std::string & child_output);
 const char * signal_name(int sig);
 // What a child that aborted said last, from the lines a runtime prints on the way down: ggml's
 // "file:line: message" (GGML_ABORT, GGML_ASSERT), libc++abi's "terminating due to uncaught exception
-// of type ...", libstdc++'s "terminate called ..." with its "what():". Directories are cut from every
+// of type ...", libstdc++'s "terminate called ..." with its "what():", led by ggml-vulkan's line naming
+// the pipeline, module or layout it failed to create where there is one. Directories are cut from every
 // path-like word, so only a source file's name survives, and the text is bounded. "" when no such
 // line is there: a driver's own output and a backtrace never reach the reason.
 std::string probe_last_words(const std::string & child_output);

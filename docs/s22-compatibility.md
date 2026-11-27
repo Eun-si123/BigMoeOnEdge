@@ -119,6 +119,38 @@ sizes (one 256 MiB binding against several bindings of a few to tens of MiB).
   (`probe_last_words`), e.g. `it said: "ggml-vulkan.cpp:8655: Requested preallocation size is too large"`.
   The next run on the phone names the failing step.
 
+### The abort named, and the fix tried (fork commit `d486a5759`)
+
+The next run on the phone (same Qwen3.6-35B-A3B Q4_K_M) carried the backend's last words in Vulkan0's
+reason:
+
+> its probe ended the process that ran it (signal 6, SIGABRT), while the device's memory rate was
+> measured; it said: "libc++abi: terminating due to uncaught exception of type vk::UnknownError:
+> vk::Device::createComputePipeline: ErrorUnknown"
+
+and its Vulkan report gave the limits: `maxStorageBufferRange=134217728` (128 MiB),
+`maxMemoryAllocationSize=1073741824`, `maxComputeSharedMemorySize=32768`, workgroup at most 1024
+invocations (`1024x1024x64`), subgroup size 64, no clustered subgroup operations, heaps of 11204 and
+256 MiB.
+
+- **Dense "not shown": confirmed.** 128 MiB is below the dense probe's 256 MiB F32 matrix. The
+  previous commit's identity check on the smaller matrix is the fix for it.
+- **MoE abort: the driver's shader compiler refuses a pipeline.** The memory-rate step first builds
+  the q4_K mat-vec (the model's experts are Q4_K). llama.cpp #28635 reports exactly this on an Adreno
+  830 for `mul_mat_vec_q4_k_*` and `mul_mat_vec_id_q4_k`, with no fix upstream. A commenter narrowed
+  it: the pipeline fails when its workgroup (specialization constant 0) is 32 or more, passes at 31
+  and below, and every other quant passes (q4_0, q5_K, q6_K, q8_0, ...). On the Adreno, ggml already
+  turns subgroup arithmetic off, so the q4_K mat-vec is built with the shared-memory reduction at
+  workgroup 64 or 256, both in the failing range.
+- **Fix tried:** on `VK_DRIVER_ID_QUALCOMM_PROPRIETARY`, with that reduction, the three q4_K mat-vec
+  pipelines (f32, f16, `MUL_MAT_ID`) are created at workgroup 16. The shader splits its workgroup
+  into groups of 16, so 16 is its smallest valid size. Nothing else changes: other drivers, other
+  quants, the reduction. On lavapipe behind the shim with `S22_QCOM=1` (Qualcomm's driver id, so
+  this path is taken), `test-backend-ops` MUL_MAT q4_K 117/117 and MUL_MAT_ID q4_K 114/114.
+  **Whether the Adreno compiler accepts it, and how fast a 16-wide q4_K mat-vec runs there, is the
+  phone's to show.** If another pipeline is refused, the reason will now name it: the probe's last
+  words lead with ggml-vulkan's "compute pipeline creation failed for <name>" line.
+
 ### Vulkan 1.1 + KHR path (fork commit `8644cb849`)
 
 A device below 1.2 is driven through its extensions (`vk_pre12_features` in the fork):
@@ -223,6 +255,6 @@ which is account-walled and not redistributable, so a build here cannot include 
 
 ### Fork commits pinned
 
-`f7adfde`, `1aa23b22b`, `ba5f8943f` and `8644cb849` on `Eun-si123/llama.cpp`
+`f7adfde`, `1aa23b22b`, `ba5f8943f`, `8644cb849` and `d486a5759` on `Eun-si123/llama.cpp`
 `s22/vk-device-api-gate`, on top of the two upstream hooks (`docs/seam.md`). Unverified on an Adreno
 730. No release or speed claim follows from these changes alone.

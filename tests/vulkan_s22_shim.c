@@ -7,7 +7,8 @@
 //   - vkGetInstanceProcAddr: 1.2/1.3-core device names -> a stub that jumps to address 0 (the
 //     loader's trampoline into an empty dispatch slot), KHR names as the driver answers them
 // Knobs: S22_HIDE_EXT="VK_A,VK_B" hides device extensions; S22_NO_INT64=1 clears shaderInt64;
-// S22_MAX_SBR / S22_MAX_ALLOC lower maxStorageBufferRange / maxMemoryAllocationSize (bytes).
+// S22_MAX_SBR / S22_MAX_ALLOC lower maxStorageBufferRange / maxMemoryAllocationSize (bytes);
+// S22_QCOM=1 reports the driver as Qualcomm's proprietary one, so its workarounds are exercised.
 //
 // Not built by CMake: it is a manual tool for a machine with a Vulkan driver (docs/s22-compatibility.md).
 //   cc -shared -fPIC tests/vulkan_s22_shim.c -o s22shim.so -ldl
@@ -101,6 +102,10 @@ static void lower(VkPhysicalDeviceProperties *p) {
 }
 // S22_MAX_ALLOC lowers VkPhysicalDeviceMaintenance3Properties::maxMemoryAllocationSize.
 static void lower_chain(VkPhysicalDeviceProperties2 *p) {
+    if (getenv("S22_QCOM"))
+        for (VkBaseOutStructure *s = (VkBaseOutStructure *) p->pNext; s; s = s->pNext)
+            if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES)
+                ((VkPhysicalDeviceDriverProperties *) s)->driverID = VK_DRIVER_ID_QUALCOMM_PROPRIETARY;
     const char *ma = getenv("S22_MAX_ALLOC");
     for (VkBaseOutStructure *s = (VkBaseOutStructure *) p->pNext; s && ma; s = s->pNext)
         if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES)
