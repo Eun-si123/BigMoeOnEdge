@@ -94,6 +94,7 @@ constexpr const char * kVulkanPipelinePrefixes =
     "matmul_id_q6_k,matmul_q8_0,matmul_id_q8_0,matmul_f16,matmul_f32,get_rows,rms_norm,rope,soft_max,flash_attn,"
     "topk_moe,argsort,silu,swiglu,geglu,add,mul,cpy,contig_cpy";
 constexpr const char * kVulkanPipelineMarker = "BMOE_VKP";
+constexpr int kNoPipelineCheck = 3; // the child's exit code where no backend offers the check
 
 // The server's workers. A request holds one for its whole life: an event stream for as long as a UI
 // is open, a chat turn while it runs and while it waits its place in line. Those are bounded
@@ -1908,17 +1909,18 @@ void register_routes(httplib::Server & svr, App & app) {
             if (status != "ok")
                 refused += "pipelines.refused: " + dev + " " + name + ": " + status.substr(0, 200) + "\n";
         }
-        if (checked == 0 && pwhy == "it exited with 1") {
+        const std::string no_check = "it exited with " + std::to_string(kNoPipelineCheck);
+        if (checked == 0 && pwhy == no_check) {
             text += "pipelines: not checked (no backend here offers the check)\n";
         } else {
             text += "pipelines.checked: " + std::to_string(checked) + " (" +
                     std::to_string(std::count(refused.begin(), refused.end(), '\n')) +
                     " refused; families: language-model kernels in f32, f16, q4_0, q8_0, q4_K, q5_K, q6_K)\n" + refused;
-            if (!pwhy.empty() && pwhy != "it exited with 1")
+            if (!pwhy.empty())
                 text += "pipelines.process: " + pwhy +
                         (last_started.empty() ? "" : ", while creating " + last_started) + "\n";
         }
-        send_json(res, json{{"text", text}, {"complete", why.empty() && (pwhy.empty() || pwhy == "it exited with 1")}});
+        send_json(res, json{{"text", text}, {"complete", why.empty() && (pwhy.empty() || pwhy == no_check)}});
     });
     svr.Get("/api/backends", [&, reply](const httplib::Request & req, httplib::Response & res) {
         reply(res, app.updates->backends(req.get_param_value("refresh") == "1"));
@@ -2038,9 +2040,11 @@ int run(int argc, char ** argv, const Embedding & embedding) {
     // The socket is bound before any slow start-up work (loading the compute backends, which on some
     // machines compiles a GPU library for tens of seconds): the port is the server's from here, a
     // client that connects meanwhile waits in the listen queue until the server serves, and --port 0
-    // reports the port it took at once. A device probe's child serves nothing and binds nothing.
+    // reports the port it took at once. A device probe's child and the pipeline check's child serve
+    // nothing and bind nothing: the server that started them holds the port.
     httplib::Server svr;
-    if (o.probe_device.empty()) {
+    const bool serves = o.probe_device.empty() && !o.vulkan_pipelines;
+    if (serves) {
         // A worker is held for a request's whole life, and a connection past the queue is closed at
         // once instead of waiting with no bound behind workers that may not come free.
         svr.new_task_queue = [] { return new httplib::ThreadPool(kWorkerThreads, 0, kMaxQueuedRequests); };
@@ -2116,7 +2120,7 @@ int run(int argc, char ** argv, const Embedding & embedding) {
                 std::printf("%s %s %s %s\n", kVulkanPipelineMarker, dev.c_str(), name.c_str(), status.c_str());
                 std::fflush(stdout);
             });
-        return asked ? 0 : 1;
+        return asked ? 0 : kNoPipelineCheck;
     }
     // The child of an isolated device probe: one device, its facts on one line, nothing else. If
     // the driver ends this process, or it never returns, that is the parent's answer about the device.

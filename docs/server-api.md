@@ -1444,7 +1444,8 @@ created one at a time through the fork's `ggml_backend_vk_check_pipelines`. Thes
 language model's graph uses, in f32, f16, q4_0, q8_0, q4_K, q5_K and q6_K. The text ends with
 `pipelines.checked: N (M refused; ...)` and one `pipelines.refused: <device> <pipeline>: <error>` line per
 refusal, or `pipelines.process: <how it ended>, while creating <pipeline>`. A build whose Vulkan backend
-lacks the check says `pipelines: not checked`. `bmoe-cli --vulkan-report` prints the same text in its own process. The Plan screens (web and
+lacks the check says `pipelines: not checked`. The child binds no port: the server that starts it
+holds one. `bmoe-cli --vulkan-report` prints the same text in its own process. The Plan screens (web and
 Android) copy it with "Copy Vulkan report".
 
 ## Backend packs and updates
